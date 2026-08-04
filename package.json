@@ -9,9 +9,9 @@
     "dev:api": "SCHEDULER_ENABLED=false node server.js",
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web install && npm --prefix web run build",
-    "test": "node --test test/",
-    "test:domain": "node --test test/domain/",
-    "test:coverage": "node --test --experimental-test-coverage test/"
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:domain": "node --test \"test/domain/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

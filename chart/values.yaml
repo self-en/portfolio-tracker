@@ -7,6 +7,28 @@ image:
 
 replicaCount: 1
 
+# Configurazione dell'app.
+app:
+  # Secret del namespace che porta le chiavi `app-password` e `session-secret`.
+  # Vuoto = <release>-auth. Se il Secret non esiste, il pod parte comunque in
+  # "locked mode" (vedi deployment.yaml).
+  secretName: ""
+  # false perché gli env di branch sono http:// semplice: un cookie Secure viene
+  # scartato in silenzio dal browser. Vedi docs/decisions.md §10.
+  cookieSecure: false
+  schedulerEnabled: true
+  logLevel: info
+
+# Il boot esegue le migrazioni e lo scheduler tiene una connessione longeva:
+# dichiarare le risorse invece di ereditare i default del namespace.
+resources:
+  requests:
+    cpu: 50m
+    memory: 192Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
 # The starter app listens on this port (PORT env below); the Service maps
 # service.port -> containerPort, and the HTTPRoute targets service.port.
 containerPort: 3000
