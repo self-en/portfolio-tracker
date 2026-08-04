@@ -3,7 +3,7 @@ const config = require("../../config");
 const { state } = require("../../boot");
 const { knownVersions } = require("../../db/migrate");
 const { asyncHandler } = require("../errors");
-const { query: dbQuery } = require("../../db/pool");
+const refreshLog = require("../../repo/refreshLog");
 
 const router = express.Router();
 
@@ -25,24 +25,9 @@ router.get(
     if (state.ready) {
       try {
         // Ultimo esito per job, per rendere osservabile lo scheduler senza Grafana.
-        const { rows } = await dbQuery(
-          `SELECT job, started_at, finished_at, ok, error, row_count
-             FROM refresh_log r
-            WHERE started_at = (SELECT MAX(started_at) FROM refresh_log WHERE job = r.job)
-            ORDER BY job`
-        );
-        lastRuns = Object.fromEntries(
-          rows.map((r) => [
-            r.job,
-            {
-              startedAt: r.started_at,
-              finishedAt: r.finished_at,
-              ok: r.ok,
-              error: r.error,
-              rowCount: r.row_count,
-            },
-          ])
-        );
+        // Passa dal repo: le route non contengono SQL (docs/decisions.md §7, e c'è
+        // un test che lo verifica).
+        lastRuns = await refreshLog.lastRuns();
       } catch {
         // refresh_log può non esistere ancora: non è un errore da propagare.
       }

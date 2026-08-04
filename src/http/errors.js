@@ -26,7 +26,9 @@ class ApiError extends Error {
 
 const err = (code, message, details) => new ApiError(code, message, details);
 
-const notFound = (what = "risorsa") => err("not_found", `${what} non trovata`);
+// Il messaggio arriva già concordato: l'italiano ha il genere, e comporre
+// `${what} non trovata` produce "strumento non trovata".
+const notFound = (message = "risorsa non trovata") => err("not_found", message);
 const conflict = (message, details) => err("conflict", message, details);
 const validation = (message, details) => err("validation_error", message, details);
 const unauthorized = (message = "autenticazione richiesta") => err("unauthorized", message);

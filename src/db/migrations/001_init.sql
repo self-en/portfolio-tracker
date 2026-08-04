@@ -30,11 +30,18 @@ CREATE TABLE IF NOT EXISTS instruments (
   -- campi obbligazionari
   face_value        NUMERIC(20,6),           -- nominale per unità (1000, 100, …)
   coupon_rate       NUMERIC(12,8),           -- annuo come FRAZIONE: 0.0345 = 3,45%
-  coupon_frequency  SMALLINT CHECK (coupon_frequency IN (0,1,2,4,12)),  -- 0 = zero coupon
+  -- `IS NULL OR ...` esplicito sulle colonne NULLABLE con lista di valori: in
+  -- Postgres un CHECK che vale NULL è già soddisfatto, quindi la guardia è
+  -- semanticamente neutra — ma pg-mem (usato dai test locali, dato che qui non c'è
+  -- Postgres) tratta `NULL IN (...)` come violazione. Costa nulla e rende lo schema
+  -- verificabile in locale.
+  coupon_frequency  SMALLINT CHECK (coupon_frequency IS NULL
+                      OR coupon_frequency IN (0,1,2,4,12)),  -- 0 = zero coupon
   first_coupon_date DATE,
   maturity_date     DATE,
   day_count         TEXT DEFAULT 'ACT/ACT-ICMA'
-                      CHECK (day_count IN ('ACT/ACT-ICMA','30E/360','ACT/365F','ACT/360')),
+                      CHECK (day_count IS NULL
+                        OR day_count IN ('ACT/ACT-ICMA','30E/360','ACT/365F','ACT/360')),
   issuer            TEXT,
   metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,   -- valvola di estensibilità
   notes             TEXT,
