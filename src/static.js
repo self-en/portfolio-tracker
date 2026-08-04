@@ -22,6 +22,21 @@ const SPA_FALLBACK = /^(?!\/api\/|\/healthz|\/assets\/).*/;
 function mountStatic(app) {
   const hasBuild = fs.existsSync(INDEX);
 
+  if (hasBuild) {
+    // Gli asset di Vite hanno l'hash del contenuto nel nome → immutable, 1 anno.
+    app.use(
+      "/assets",
+      express.static(path.join(DIST, "assets"), { immutable: true, maxAge: "1y" })
+    );
+  }
+  // Terminatore per /assets/: un file non trovato qui è un 404, non il fallback SPA.
+  // Registrato ANCHE nel ramo stub (build assente): senza build non esiste proprio
+  // la cartella da servire, ma un 404 onesto resta corretto — è lo stesso 200+HTML
+  // fasullo che vogliamo evitare a essere sbagliato, non solo quando la build c'è.
+  app.use("/assets", (_req, res) =>
+    res.status(404).type("txt").set("Cache-Control", "no-store").send("asset non trovato")
+  );
+
   if (!hasBuild) {
     // Warning e stub, NON un crash: `npm run dev:api` da solo è un flusso di
     // lavoro legittimo (la SPA gira su :5173 col proxy di Vite).
@@ -51,15 +66,6 @@ a{color:#7dd3fc}</style></head><body><div class="card">
     return;
   }
 
-  // Gli asset di Vite hanno l'hash del contenuto nel nome → immutable, 1 anno.
-  app.use(
-    "/assets",
-    express.static(path.join(DIST, "assets"), { immutable: true, maxAge: "1y" })
-  );
-  // Terminatore per /assets/: un file non trovato qui è un 404, non il fallback SPA.
-  app.use("/assets", (_req, res) =>
-    res.status(404).type("txt").set("Cache-Control", "no-store").send("asset non trovato")
-  );
   // Tutto il resto (favicon, manifest, …) con cache breve.
   app.use(express.static(DIST, { index: false, maxAge: "5m" }));
 
