@@ -185,8 +185,11 @@ matematica verificabile senza Postgres (che in locale non c'è).
 Dettagli reali della risposta Yahoo, catturati e non indovinati:
 
 - Le barre di `chart` usano **`adjclose`** (c minuscola), non `adjClose`.
-- `events` è `[]` (array vuoto) quando non ci sono eventi, `{dividends, splits}`
-  altrimenti: il normalizzatore deve tollerare entrambe le forme.
+- Quando nel periodo non ci sono eventi, la chiave `events` è **completamente
+  assente** dalla risposta — non `{}`, non `[]`. Un accesso diretto a
+  `chart.events.dividends` è quindi un TypeError su ogni strumento senza
+  dividendi nella finestra richiesta. (Il normalizzatore tollera comunque anche
+  `{}` e `[]`: costa una riga.)
 - `events.splits[]` porta `{numerator, denominator, splitRatio: "4:1"}` →
   `ratio = numerator / denominator`.
 - `quoteSummary` **omette i moduli assenti** (`calendarEvents` non c'è per

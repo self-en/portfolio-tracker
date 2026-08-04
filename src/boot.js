@@ -91,16 +91,24 @@ async function start() {
 
     if (!ok) return state;
 
-    // Scheduler + reconciler arrivano in Fase 4; il require è lazy così le fasi
-    // precedenti restano deployabili.
+    // Scheduler (che include catch-up e reconciler quando è leader).
     try {
       const { startScheduler } = require("./market/scheduler");
-      await startScheduler(state);
+      const result = await startScheduler(state);
+      state.scheduler.leader = !!result.leader;
     } catch (err) {
-      if (err?.code === "MODULE_NOT_FOUND" && /market\/scheduler/.test(err.message)) {
-        logger.info("[boot] scheduler non ancora presente, salto");
-      } else {
-        logger.error({ err: err.message }, "[boot] avvio scheduler fallito (continuo)");
+      // Uno scheduler che non parte è un degrado, non un guasto: l'app resta
+      // utilizzabile con i dati in cache e il refresh manuale.
+      logger.error({ err: err.message }, "[boot] avvio scheduler fallito (continuo)");
+    }
+
+    // Reconciler anche a scheduler disabilitato (sviluppo locale): allinea la
+    // copertura prezzi senza aspettare un cron.
+    if (!config.scheduler.enabled) {
+      try {
+        await require("./market/refresher").reconcile();
+      } catch (err) {
+        logger.warn({ err: err.message }, "[boot] reconciler fallito (continuo)");
       }
     }
   } catch (err) {
