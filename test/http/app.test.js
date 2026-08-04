@@ -102,6 +102,19 @@ test("il fallback SPA serve le rotte client ma NON tocca /api né /healthz", asy
   assert.match(health.headers.get("content-type") || "", /application\/json/);
 });
 
+test("un asset MANCANTE dà 404, non index.html con status 200", async () => {
+  // Senza l'esclusione di /assets/ dal fallback SPA, un bundle mancante — index.html
+  // in cache che punta a un asset di un deploy precedente — riceverebbe HTML con
+  // status 200. Il browser proverebbe a eseguirlo come JavaScript e fallirebbe con
+  // "Unexpected token '<'", un errore che non nomina né il file né la causa.
+  const res = await fetch(`${base}/assets/questo-bundle-non-esiste.js`);
+  assert.equal(res.status, 404);
+  assert.ok(
+    !/text\/html/.test(res.headers.get("content-type") || ""),
+    "un asset mancante non deve restituire HTML"
+  );
+});
+
 test("index.html è no-store, gli asset hashati sono immutable", async () => {
   // index.html punta ai bundle hashati: una copia in cache dopo un deploy servirebbe
   // riferimenti ad asset che non esistono più.

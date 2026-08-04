@@ -11,7 +11,13 @@ const INDEX = path.join(DIST, "index.html");
 // Regex con negative lookahead invece di '*': si comporta identica su Express 4 e
 // sopravvive a un futuro passaggio a Express 5, dove la semantica della wildcard
 // nelle route è cambiata.
-const SPA_FALLBACK = /^(?!\/api\/|\/healthz).*/;
+//
+// `/assets/` è ESCLUSO dal fallback, e non è un dettaglio: senza l'esclusione, un
+// bundle mancante (index.html in cache che punta a un asset di un deploy precedente)
+// riceverebbe index.html con status 200. Il browser proverebbe a eseguire HTML come
+// JavaScript e fallirebbe con "Unexpected token '<'" — un errore che non nomina né
+// il file mancante né la causa. Un 404 onesto è diagnosticabile in un secondo.
+const SPA_FALLBACK = /^(?!\/api\/|\/healthz|\/assets\/).*/;
 
 function mountStatic(app) {
   const hasBuild = fs.existsSync(INDEX);
@@ -49,6 +55,10 @@ a{color:#7dd3fc}</style></head><body><div class="card">
   app.use(
     "/assets",
     express.static(path.join(DIST, "assets"), { immutable: true, maxAge: "1y" })
+  );
+  // Terminatore per /assets/: un file non trovato qui è un 404, non il fallback SPA.
+  app.use("/assets", (_req, res) =>
+    res.status(404).type("txt").set("Cache-Control", "no-store").send("asset non trovato")
   );
   // Tutto il resto (favicon, manifest, …) con cache breve.
   app.use(express.static(DIST, { index: false, maxAge: "5m" }));

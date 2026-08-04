@@ -50,23 +50,35 @@ function buildApp() {
     })
   );
 
-  // Log di accesso strutturato, mantenuto VERBATIM dallo scaffold. Su `main` ogni
-  // riga diventa un record OTLP che porta il trace context della richiesta
-  // (si salta da un trace ai suoi log in Grafana), es. "GET /healthz 200 0.4ms".
-  // Non logga il body: va tenuto così, è ciò che impedisce alla password di
-  // finire nei log.
+  // Log di accesso strutturato, nella forma dello scaffold. Su `main` ogni riga
+  // diventa un record OTLP che porta il trace context della richiesta (si salta da un
+  // trace ai suoi log in Grafana), es. "GET /healthz 200 0.4ms".
+  //
+  // NON logga il body: va tenuto così, è ciò che impedisce alla password di finire
+  // nei log — il redact del logger è la seconda rete, non la prima.
   app.use((req, res, next) => {
     const start = process.hrtime.bigint();
+    // Il percorso va catturato ORA, non dentro l'handler `finish`: un
+    // `app.use("/assets", …)` riscrive temporaneamente `req.url` togliendo il
+    // prefisso di mount, e l'evento `finish` può arrivare prima che venga
+    // ripristinato — a quel punto `req.path` è "/index-abc.js" e qualsiasi controllo
+    // sul prefisso fallisce in silenzio.
+    const method = req.method;
+    const url = req.originalUrl;
+    const isAsset = /^\/(assets\/|favicon|robots\.txt|manifest)/.test(req.path);
+
     res.on("finish", () => {
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
-      logger.info(
-        {
-          method: req.method,
-          path: req.originalUrl,
-          status: res.statusCode,
-          durationMs: Number(ms.toFixed(1)),
-        },
-        `${req.method} ${req.originalUrl} ${res.statusCode} ${ms.toFixed(1)}ms`
+      // Gli asset statici andati a buon fine scendono a `debug`. Lo scaffold serviva
+      // una sola pagina; una SPA chiede bundle, mappe e favicon a ogni caricamento, e
+      // su `main` OGNI riga diventa un record OTLP — il rumore seppellirebbe le
+      // richieste che contano. Tutto ciò che non è 2xx resta a `info`, così un asset
+      // mancante o un 500 non si nasconde mai.
+      const quiet = isAsset && res.statusCode < 400;
+      const log = quiet ? logger.debug.bind(logger) : logger.info.bind(logger);
+      log(
+        { method, path: url, status: res.statusCode, durationMs: Number(ms.toFixed(1)) },
+        `${method} ${url} ${res.statusCode} ${ms.toFixed(1)}ms`
       );
     });
     next();
