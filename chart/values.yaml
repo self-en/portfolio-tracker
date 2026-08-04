@@ -1,0 +1,53 @@
+image:
+  # Filled in at project-creation time by nedo (points at the GHCR package the
+  # CI workflow below pushes to). The ApplicationSet overrides image.tag per
+  # commit with the immutable sha-<short> tag.
+  repository: ghcr.io/self-en/portfolio-tracker/portfolio-tracker
+  tag: latest
+
+replicaCount: 1
+
+# The starter app listens on this port (PORT env below); the Service maps
+# service.port -> containerPort, and the HTTPRoute targets service.port.
+containerPort: 3000
+
+service:
+  port: 80
+
+# Overridden per-branch by the ApplicationSet via `helm parameters` - the app
+# repo never needs to set this manually.
+hostname: changeme.self-en.uk
+
+# Shared Gateway created once by the platform automation. Only override if you
+# renamed it during install.
+gateway:
+  name: eg
+  namespace: envoy-gateway-system
+
+# Set per-commit by the ApplicationSet; stamped as a pod annotation to force a
+# rollout on every push (belt-and-suspenders alongside image.tag).
+commitSha: ""
+
+# Overridden per-branch by the ApplicationSet, same as `hostname` - only set
+# (non-empty) for the `main` branch, since metrics are collected for that
+# env only. Push-based (OTLP), not scrape-based.
+otel:
+  endpoint: ""
+
+# Optional GHCR pull secret, only needed if the image package is PRIVATE. Public
+# packages (the happy path) need nothing here. If you must keep it private,
+# create the `ghcr-pull-secret` docker-registry Secret in the env namespace
+# and set enabled: true.
+imagePullSecret:
+  name: ghcr-pull-secret
+  enabled: false
+
+# Shared Postgres cluster: one database per branch (named after the release,
+# non-alphanumeric -> '_'), created by the PreSync hook Job. These are passed
+# per-branch by the ApplicationSet as plain helm parameters. Leave empty to run
+# without a database.
+postgres:
+  host: ""
+  appUser: ""
+  appPassword: ""
+  adminPassword: ""

@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+      annotations:
+        # Set to the per-commit sha by the ApplicationSet - forces a rollout on
+        # every push even if image.tag somehow didn't change (belt-and-suspenders).
+        self-en.local/commit-sha: {{ .Values.commitSha | quote }}
+    spec:
+      {{- if .Values.imagePullSecret.enabled }}
+      imagePullSecrets:
+      - name: {{ .Values.imagePullSecret.name }}
+      {{- end }}
+      containers:
+      - name: app
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        # Always re-check the registry on (re)start so a new digest behind the
+        # pinned tag is picked up.
+        imagePullPolicy: Always
+        ports:
+        - containerPort: {{ .Values.containerPort }}
+        env:
+        - name: PORT
+          value: {{ .Values.containerPort | quote }}
+        - name: REPO_NAME
+          value: {{ .Release.Name | quote }}
+        {{- if .Values.postgres.host }}
+        # This branch's own database (created by the PreSync hook). Passed both as
+        # a DATABASE_URL and as discrete PG* vars - the app prefers the discrete
+        # vars, which avoid URL-encoding pitfalls in the generated password.
+        - name: PGHOST
+          value: {{ .Values.postgres.host | quote }}
+        - name: PGPORT
+          value: "5432"
+        - name: PGUSER
+          value: {{ .Values.postgres.appUser | quote }}
+        - name: PGPASSWORD
+          value: {{ .Values.postgres.appPassword | quote }}
+        - name: PGDATABASE
+          value: {{ .Release.Name | replace "-" "_" | quote }}
+        - name: DATABASE_URL
+          value: "postgresql://{{ .Values.postgres.appUser }}:{{ .Values.postgres.appPassword }}@{{ .Values.postgres.host }}:5432/{{ .Release.Name | replace "-" "_" }}"
+        {{- end }}
+        {{- if .Values.otel.endpoint }}
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
+        - name: OTEL_SERVICE_NAME
+          value: {{ .Release.Name | quote }}
+        # otel.endpoint is Alloy's OTLP *HTTP* port (4318), so pin the protocol to
+        # http/protobuf rather than rely on the SDK default (a future flip to grpc
+        # would silently hit the wrong port). One endpoint carries all 3 signals;
+        # Alloy fans them out to Tempo/Prometheus/Loki.
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: "http/protobuf"
+        # Emit all three signals over OTLP. These are the SDK defaults today, set
+        # explicitly so "traces + metrics + logs" is intent, not luck.
+        - name: OTEL_TRACES_EXPORTER
+          value: "otlp"
+        - name: OTEL_METRICS_EXPORTER
+          value: "otlp"
+        - name: OTEL_LOGS_EXPORTER
+          value: "otlp"
+        # Zero-code OpenTelemetry: preload the auto-instrumentation register hook
+        # (added to package.json), which instruments express/pg/http and exports
+        # traces + metrics + logs over OTLP to the endpoint above. Logs flow via
+        # the pino instrumentation (the app logs through pino, see server.js) -
+        # bare console.log is NOT bridged to OTLP. Gated on otel.endpoint (only the
+        # `main` branch, per the ApplicationSet), so on every other branch
+        # NODE_OPTIONS is unset, the SDK is never loaded, and nothing tries to
+        # export to a missing collector.
+        - name: NODE_OPTIONS
+          value: "--require @opentelemetry/auto-instrumentations-node/register"
+        {{- end }}
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.containerPort }}
+          initialDelaySeconds: 3
+          periodSeconds: 10

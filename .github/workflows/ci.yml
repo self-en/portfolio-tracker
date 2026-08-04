@@ -1,0 +1,53 @@
+name: build
+# Builds a per-branch image so every branch gets its own preview. The
+# branch-previews ApplicationSet pins the immutable sha-<short> tag; the
+# branch-slug tag is pushed too (informational, mirrors the platform convention).
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compute tags
+        id: meta
+        run: |
+          echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          # Branch slug: lowercase, non-alphanumeric -> '-', trimmed. Matches
+          # ArgoCD's slugify so the tag lines up with the preview's naming.
+          slug=$(echo "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
+      # QEMU + Buildx: build a multi-arch image so previews run natively on both
+      # amd64 (cloud VM) and arm64 (Apple Silicon Docker Desktop dev clusters).
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # ghcr.io/<owner>/<repo>/<repo> - matches image.repository (ghcr.io/self-en/portfolio-tracker/portfolio-tracker)
+          # that nedo fills into the chart at project-creation time.
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ github.event.repository.name }}:sha-${{ steps.meta.outputs.short }}
+            ghcr.io/${{ github.repository }}/${{ github.event.repository.name }}:${{ steps.meta.outputs.slug }}

@@ -1,0 +1,52 @@
+{{- if .Values.postgres.host }}
+# Creates this branch's own database (one database per branch inside the shared
+# Postgres cluster) BEFORE the app syncs. An ArgoCD PreSync hook, NOT a Helm
+# hook, since these charts are applied by ArgoCD. Cleanup on branch deletion is
+# deliberately NOT a PreDelete hook here (ArgoCD can't render hook manifests once
+# the branch is gone from git) - a CronJob reconciler in the platform drops
+# orphaned p_* databases instead.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-create
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: create-db
+        image: postgres:16-alpine
+        env:
+        - name: PGHOST
+          value: {{ .Values.postgres.host | quote }}
+        - name: PGPORT
+          value: "5432"
+        # Superuser: creating a database and assigning ownership needs it.
+        - name: PGUSER
+          value: postgres
+        - name: PGPASSWORD
+          value: {{ .Values.postgres.adminPassword | quote }}
+        - name: PGDATABASE
+          value: postgres
+        - name: DB_NAME
+          value: {{ .Release.Name | replace "-" "_" | quote }}
+        - name: DB_OWNER
+          value: {{ .Values.postgres.appUser | quote }}
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          # Postgres has no CREATE DATABASE IF NOT EXISTS - gate on pg_database.
+          exists=$(psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'")
+          if [ "$exists" = "1" ]; then
+            echo "database $DB_NAME already exists"
+          else
+            echo "creating database $DB_NAME owned by $DB_OWNER"
+            psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_OWNER\""
+          fi
+{{- end }}
