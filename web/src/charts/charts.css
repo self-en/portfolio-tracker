@@ -421,7 +421,7 @@
 
 .pt-agenda-item {
   display: grid;
-  grid-template-columns: 5.5rem 1fr auto auto;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 0.25rem 0.75rem;
   padding: 0.55rem 0.7rem;

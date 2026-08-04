@@ -110,10 +110,16 @@ router.post(
     if (record.instrumentId) {
       // Ledger esistente + la transazione ipotetica: la posizione risultante è
       // calcolata, non stimata.
-      const existing = await txRepo.ledger({
-        portfolioId: record.portfolioId,
-        instrumentId: record.instrumentId,
-      });
+      // In modifica si esclude la transazione che si sta editando: altrimenti la si
+      // sommerebbe a un ledger che già la contiene, e `resultingPosition` la
+      // conterebbe due volte — un saldo credibile e sbagliato.
+      const excludeId = input.excludeTransactionId ?? null;
+      const existing = (
+        await txRepo.ledger({
+          portfolioId: record.portfolioId,
+          instrumentId: record.instrumentId,
+        })
+      ).filter((t) => excludeId === null || t.id !== Number(excludeId));
       const instruments = new Map([[instrument.id, instrument]]);
       // Id sentinella: deve ordinarsi DOPO qualsiasi transazione dello stesso
       // giorno, perché è l'operazione che l'utente sta per aggiungere.

@@ -183,7 +183,7 @@ export default function ValueSeriesChart({ points, meta, refetching = false }) {
             minTickGap={44}
             interval="preserveStartEnd"
           />
-          {/* UN SOLO asse y. Nessun yAxisId, così non può nascerne un secondo. */}
+          {/* UN SOLO asse y, senza identificatore d'asse: non può nascerne un secondo. */}
           <YAxis
             domain={[0, "auto"]}
             tickFormatter={(v) => num(v, 0)}

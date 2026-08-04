@@ -24,6 +24,34 @@ const COUPON_FREQUENCIES = [0, 1, 2, 4, 12];
 const nullableDate = () => dateString().nullish();
 const nullableDecimal = (opts) => decimalString(opts).nullish();
 
+/**
+ * I DEFAULT NON VANNO NELLA FORMA BASE.
+ *
+ * `z.object(shape).partial()` **non rimuove** i `.default()`: un campo assente da una
+ * PATCH riceve comunque il suo default, e le route fondono `{...esistente, ...body}`
+ * — quindi il default SOVRASCRIVE il valore salvato. Conseguenze reali, entrambe
+ * trovate provando i flussi:
+ *
+ *   - `PATCH /transactions/:id {price}` riportava `fees` e `taxes` a "0" e
+ *     `trade_ccy` a "EUR": perdita di dati silenziosa.
+ *   - `PATCH /instruments/:id {active:false}` riportava `price_source` a "yahoo",
+ *     e la refine "le obbligazioni non hanno copertura di mercato" rifiutava la
+ *     richiesta con 422 — rompendo il flusso "disattiva invece di eliminare" che il
+ *     409 su DELETE suggerisce esplicitamente.
+ *
+ * Quindi: la forma base è SENZA default, lo schema di creazione li applica, e quello
+ * di update resta pulito. `withDefaults` rende l'intenzione esplicita invece di
+ * affidarla alla memoria di chi aggiunge il prossimo campo.
+ */
+function withDefaults(shape, defaults) {
+  const out = { ...shape };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!out[key]) throw new Error(`withDefaults: campo inesistente ${key}`);
+    out[key] = out[key].default(value);
+  }
+  return out;
+}
+
 // --- Strumenti ---
 
 const instrumentBase = {
@@ -38,8 +66,8 @@ const instrumentBase = {
     .nullish(),
   exchange: z.string().trim().max(40).nullish(),
   currency: currency(),
-  priceSource: z.enum(PRICE_SOURCES).default("yahoo"),
-  quoteConvention: z.enum(QUOTE_CONVENTIONS).default("PRICE"),
+  priceSource: z.enum(PRICE_SOURCES),
+  quoteConvention: z.enum(QUOTE_CONVENTIONS),
   faceValue: nullableDecimal({ positive: true }),
   // FRAZIONE annua: 0.0345 = 3,45%. Il form lo converte da percentuale.
   couponRate: nullableDecimal({ nonNegative: true }),
@@ -52,9 +80,9 @@ const instrumentBase = {
   maturityDate: nullableDate(),
   dayCount: z.enum(DAY_COUNTS).nullish(),
   issuer: z.string().trim().max(200).nullish(),
-  metadata: z.record(z.string(), z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()),
   notes: z.string().max(4000).nullish(),
-  active: z.boolean().default(true),
+  active: z.boolean(),
 };
 
 /**
@@ -99,7 +127,19 @@ function refineInstrument(schema) {
     });
 }
 
-const createInstrument = refineInstrument(z.object(instrumentBase));
+// I default vivono SOLO nel percorso di creazione (vedi withDefaults sopra).
+const createInstrument = refineInstrument(
+  z.object(
+    withDefaults(instrumentBase, {
+      priceSource: "yahoo",
+      quoteConvention: "PRICE",
+      metadata: {},
+      active: true,
+    })
+  )
+);
+// Nessun default: un campo assente resta `undefined`, così la fusione con il record
+// esistente non può cancellare nulla.
 const updateInstrument = z.object(instrumentBase).partial();
 
 // --- Transazioni ---
@@ -116,10 +156,10 @@ const transactionBase = {
   nominal: nullableDecimal({ positive: true }),
   price: nullableDecimal({ nonNegative: true }),
   grossAmount: nullableDecimal(),
-  fees: decimalString({ nonNegative: true }).default("0"),
-  taxes: decimalString({ nonNegative: true }).default("0"),
+  fees: decimalString({ nonNegative: true }),
+  taxes: decimalString({ nonNegative: true }),
   accruedInterest: nullableDecimal(),
-  tradeCcy: currency().default("EUR"),
+  tradeCcy: currency(),
   fxRate: nullableDecimal({ positive: true }),
   splitRatio: nullableDecimal({ positive: true }),
   note: z.string().max(2000).nullish(),
@@ -128,10 +168,15 @@ const transactionBase = {
 
 function refineTransaction(schema) {
   return schema
-    .refine((v) => ["DEPOSIT", "WITHDRAWAL"].includes(v.type) || v.instrumentId != null, {
-      message: "questo tipo di movimento richiede uno strumento",
-      path: ["instrumentId"],
-    })
+    // FEE e TAX sono ammesse SENZA strumento: un bollo, un canone di custodia o
+    // un'imposta di conto non appartengono a un titolo specifico, ed è il caso più
+    // comune di commissione standalone. (La migrazione 003 allinea il CHECK del
+    // database, che inizialmente li richiedeva.)
+    .refine(
+      (v) =>
+        ["DEPOSIT", "WITHDRAWAL", "FEE", "TAX"].includes(v.type) || v.instrumentId != null,
+      { message: "questo tipo di movimento richiede uno strumento", path: ["instrumentId"] }
+    )
     .refine(
       (v) =>
         !["BUY", "SELL"].includes(v.type) ||
@@ -165,12 +210,23 @@ function refineTransaction(schema) {
     });
 }
 
-const createTransaction = refineTransaction(z.object(transactionBase));
-// PATCH: `type` e `tradeDate` restano obbligatori, perché il ricalcolo degli
-// importi ha bisogno del quadro completo. Il route ricompone il record e lo
-// rivalida con lo schema pieno.
+const txDefaults = { fees: "0", taxes: "0", tradeCcy: "EUR" };
+const createTransaction = refineTransaction(
+  z.object(withDefaults(transactionBase, txDefaults))
+);
+// PATCH senza default: il route ricompone il record fondendolo con quello esistente e
+// lo rivalida con lo schema completo, quindi i campi assenti devono restare assenti.
 const updateTransaction = z.object(transactionBase).partial();
-const previewTransaction = createTransaction;
+
+const previewTransaction = refineTransaction(
+  z.object({
+    ...withDefaults(transactionBase, txDefaults),
+    // In MODIFICA l'anteprima deve ESCLUDERE la transazione che si sta editando:
+    // altrimenti la somma a un ledger che già la contiene e `resultingPosition` la
+    // conta due volte, mostrando un saldo credibile e sbagliato.
+    excludeTransactionId: z.coerce.number().int().positive().nullish(),
+  })
+);
 
 // --- Query string ---
 

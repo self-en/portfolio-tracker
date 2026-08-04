@@ -12,4 +12,5 @@ const read = (f) => fs.readFileSync(path.join(__dirname, f), "utf8");
 module.exports = [
   { version: "001_init", sql: read("001_init.sql") },
   { version: "002_seed", sql: read("002_seed.sql") },
+  { version: "003_standalone_fees", sql: read("003_standalone_fees.sql") },
 ];

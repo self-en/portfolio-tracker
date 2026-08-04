@@ -10,7 +10,7 @@ process.env.APP_PASSWORD = "test";
 process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
 
 const { newDb } = require("pg-mem");
-const { migrate } = require("../../src/db/migrate");
+const { migrate, knownVersions } = require("../../src/db/migrate");
 
 function makeDb() {
   // noAstCoverageCheck: l'adapter `pg` di pg-mem esegue un controllo di copertura
@@ -39,7 +39,9 @@ function makeDb() {
 test("le migrazioni si applicano da zero", async () => {
   const { pool } = makeDb();
   const r = await migrate(pool);
-  assert.deepEqual(r.applied, ["001_init", "002_seed"]);
+  // Confronto con il REGISTRO, non con una lista scritta a mano: aggiungere una
+  // migrazione non deve far fallire questo test.
+  assert.deepEqual(r.applied, knownVersions());
   assert.deepEqual(r.mismatched, []);
 
   // Le tabelle chiave esistono e sono interrogabili.
@@ -74,7 +76,7 @@ test("migrate() eseguita due volte è no-op la seconda (idempotenza)", async () 
   await migrate(pool);
   const second = await migrate(pool);
   assert.deepEqual(second.applied, [], "la seconda esecuzione non deve applicare nulla");
-  assert.deepEqual(second.skipped, ["001_init", "002_seed"]);
+  assert.deepEqual(second.skipped, knownVersions());
 
   // E il seed non è stato duplicato.
   const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM portfolios");

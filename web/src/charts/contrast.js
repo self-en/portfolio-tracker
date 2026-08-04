@@ -10,7 +10,7 @@
 
 import { clamp } from "./numbers.js";
 
-/** "#1baf7a" → [27, 175, 122]. Ritorna null se non è un hex a 6 cifre. */
+/** Colore esadecimale a 6 cifre → [r, g, b]. Ritorna null se non lo è. */
 function channels(hex) {
   const m = /^#([0-9a-f]{6})$/i.exec(String(hex).trim());
   if (!m) return null;

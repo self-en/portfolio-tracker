@@ -146,8 +146,11 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
       price: TRADE_TYPES.has(nextType) ? f.price : "",
       accruedInterest: TRADE_TYPES.has(nextType) ? f.accruedInterest : "",
       grossAmount: AMOUNT_TYPES.has(nextType) ? f.grossAmount : "",
+      // Commissioni e imposte sopravvivono solo dove il form le mostra: un valore
+      // che resta in stato ma non a schermo verrebbe salvato senza che l'utente lo
+      // veda.
       taxes: INCOME_TYPES.has(nextType) || TRADE_TYPES.has(nextType) ? f.taxes : "",
-      fees: AMOUNT_TYPES.has(nextType) || TRADE_TYPES.has(nextType) ? f.fees : "",
+      fees: INCOME_TYPES.has(nextType) || TRADE_TYPES.has(nextType) ? f.fees : "",
       splitRatio: nextType === "SPLIT" ? f.splitRatio : "",
       instrumentId: NO_INSTRUMENT_TYPES.has(nextType) ? "" : f.instrumentId,
     }));
@@ -271,6 +274,24 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
   }, [payloadKey, previewReady]);
 
   useEffect(() => () => previewAbort.current?.abort(), []);
+
+  // In modifica il nominale non arriva dal database (è la quantità che viene
+  // persistita), ma in modalità obbligazionaria è il campo primario: si riempie una
+  // volta sola col valore che l'anteprima ha derivato, così l'utente ritrova
+  // l'importo che il broker gli ha mostrato invece di un campo vuoto. Il ricalcolo
+  // sta comunque sul server: qui non si divide nulla.
+  const nominalPrefilled = useRef(false);
+  useEffect(() => {
+    if (!bondMode || nominalPrefilled.current) return;
+    if (form.nominal !== "") {
+      nominalPrefilled.current = true;
+      return;
+    }
+    if (preview?.nominal) {
+      nominalPrefilled.current = true;
+      setForm((f) => (f.nominal === "" ? { ...f, nominal: String(preview.nominal) } : f));
+    }
+  }, [bondMode, preview, form.nominal]);
 
   const save = useMutation({
     mutationFn: (bodyObj) =>

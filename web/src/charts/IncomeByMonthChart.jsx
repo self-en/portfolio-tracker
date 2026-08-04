@@ -161,7 +161,7 @@ export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching 
             minTickGap={8}
             interval="preserveStartEnd"
           />
-          {/* Un solo asse y: nessun yAxisId in tutto il file. */}
+          {/* Un solo asse y, senza identificatore d'asse: mai una seconda scala. */}
           <YAxis
             tickFormatter={(v) => num(v, 0)}
             stroke={theme.axis}
