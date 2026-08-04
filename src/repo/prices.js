@@ -1,6 +1,7 @@
 const { query } = require("../db/pool");
 const rows = require("./rows");
 const { normalizeDate } = require("../domain/calendar");
+const { inList } = require("./sqlUtil");
 
 /** Serie prezzi di uno strumento. Righe SPARSE: il forward-fill lo fa domain/. */
 async function series(instrumentId, { from, to } = {}) {
@@ -26,8 +27,8 @@ async function series(instrumentId, { from, to } = {}) {
 async function seriesForMany(instrumentIds, { from, to } = {}) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
-  const params = [instrumentIds];
-  const where = ["instrument_id = ANY($1::int[])"];
+  const params = [];
+  const where = [`instrument_id ${inList(params, instrumentIds)}`];
   if (from) {
     params.push(from);
     where.push(`price_date >= $${params.length}::date`);
@@ -58,12 +59,15 @@ async function seriesForMany(instrumentIds, { from, to } = {}) {
 async function latestAsOf(instrumentIds, asOf) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
+  const params = [];
+  const idIn = inList(params, instrumentIds);
+  params.push(asOf);
   const { rows: r } = await query(
     `SELECT DISTINCT ON (instrument_id) instrument_id, price_date, close, source
        FROM prices_daily
-      WHERE instrument_id = ANY($1::int[]) AND price_date <= $2::date
+      WHERE instrument_id ${idIn} AND price_date <= $${params.length}::date
       ORDER BY instrument_id, price_date DESC`,
-    [instrumentIds, asOf]
+    params
   );
   for (const row of r) {
     map.set(Number(row.instrument_id), {
@@ -80,14 +84,17 @@ async function latestAsOf(instrumentIds, asOf) {
 async function previousCloseAsOf(instrumentIds, asOf) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
+  const params2 = [];
+  const idIn2 = inList(params2, instrumentIds);
+  params2.push(asOf);
   const { rows: r } = await query(
     `SELECT instrument_id, close FROM (
        SELECT instrument_id, close,
               ROW_NUMBER() OVER (PARTITION BY instrument_id ORDER BY price_date DESC) AS rn
          FROM prices_daily
-        WHERE instrument_id = ANY($1::int[]) AND price_date <= $2::date
+        WHERE instrument_id ${idIn2} AND price_date <= $${params2.length}::date
      ) s WHERE rn = 2`,
-    [instrumentIds, asOf]
+    params2
   );
   for (const row of r) map.set(Number(row.instrument_id), row.close);
   return map;
@@ -188,10 +195,11 @@ async function upsertQuote(q) {
 async function latestQuotes(instrumentIds) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
+  const params = [];
   const { rows: r } = await query(
     `SELECT instrument_id, price, currency, previous_close, market_state, quote_time, source, fetched_at
-       FROM quotes_latest WHERE instrument_id = ANY($1::int[])`,
-    [instrumentIds]
+       FROM quotes_latest WHERE instrument_id ${inList(params, instrumentIds)}`,
+    params
   );
   for (const row of r) map.set(Number(row.instrument_id), rows.quote(row));
   return map;

@@ -3,6 +3,7 @@
 const { query } = require("../db/pool");
 const rows = require("./rows");
 const { normalizeDate } = require("../domain/calendar");
+const { inList } = require("./sqlUtil");
 
 const BASE = "EUR";
 
@@ -12,8 +13,8 @@ async function seriesForMany(quoteCcys, { from, to, base = BASE } = {}) {
   const ccys = (quoteCcys || []).filter((c) => c && c !== base);
   if (ccys.length === 0) return map;
 
-  const params = [base, ccys];
-  const where = ["base_ccy = $1", "quote_ccy = ANY($2::text[])"];
+  const params = [base];
+  const where = ["base_ccy = $1", `quote_ccy ${inList(params, ccys)}`];
   if (from) {
     params.push(from);
     where.push(`rate_date >= $${params.length}::date`);
@@ -40,12 +41,15 @@ async function ratesAsOf(quoteCcys, asOf, base = BASE) {
   const map = new Map();
   const ccys = (quoteCcys || []).filter((c) => c && c !== base);
   if (ccys.length === 0) return map;
+  const params = [base];
+  const ccyIn = inList(params, ccys);
+  params.push(asOf);
   const { rows: r } = await query(
     `SELECT DISTINCT ON (quote_ccy) quote_ccy, rate, rate_date
        FROM fx_rates_daily
-      WHERE base_ccy = $1 AND quote_ccy = ANY($2::text[]) AND rate_date <= $3::date
+      WHERE base_ccy = $1 AND quote_ccy ${ccyIn} AND rate_date <= $${params.length}::date
       ORDER BY quote_ccy, rate_date DESC`,
-    [base, ccys, asOf]
+    params
   );
   for (const row of r) map.set(row.quote_ccy.trim(), row.rate);
   return map;
@@ -116,8 +120,7 @@ async function list({ quotes, date, from, to, base = BASE } = {}) {
   const params = [base];
   const where = ["base_ccy = $1"];
   if (quotes && quotes.length) {
-    params.push(quotes);
-    where.push(`quote_ccy = ANY($${params.length}::text[])`);
+    where.push(`quote_ccy ${inList(params, quotes)}`);
   }
   if (date) {
     params.push(date);

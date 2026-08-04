@@ -14,9 +14,7 @@ process.env.APP_PASSWORD = "test";
 process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
 process.env.PGHOST = "localhost"; // fa credere a config.js che il DB sia configurato
 
-const { newDb } = require("pg-mem");
-const { migrate } = require("../../src/db/migrate");
-const pool = require("../../src/db/pool");
+const { freshMemDb, tolerantMem } = require("../helpers/memdb");
 
 const instrumentsRepo = require("../../src/repo/instruments");
 const txRepo = require("../../src/repo/transactions");
@@ -26,35 +24,8 @@ const fxRepo = require("../../src/repo/fx");
 const eventsRepo = require("../../src/repo/events");
 const refreshLog = require("../../src/repo/refreshLog");
 
-async function freshDb() {
-  const db = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true });
-  for (const name of ["pg_advisory_lock", "pg_try_advisory_lock", "pg_advisory_unlock"]) {
-    db.public.registerFunction({
-      name,
-      args: [db.public.getType("int")],
-      returns: db.public.getType(name === "pg_advisory_lock" ? "text" : "bool"),
-      implementation: () => (name === "pg_advisory_lock" ? "" : true),
-    });
-  }
-  const { Pool } = db.adapters.createPg();
-  const p = new Pool();
-  pool._setPool(p);
-  await migrate(p);
-  return { db, pool: p };
-}
-
-/** Esegue `fn`, ma salta il test se pg-mem non supporta il costrutto. */
-async function tolerant(t, fn) {
-  try {
-    await fn();
-  } catch (err) {
-    if (/not supported|NotSupported|🔨/i.test(String(err.message))) {
-      t.skip(`limite di pg-mem: ${String(err.message).split("\n")[0].slice(0, 120)}`);
-      return;
-    }
-    throw err;
-  }
-}
+const freshDb = freshMemDb;
+const tolerant = tolerantMem;
 
 const EQ = {
   assetClass: "EQUITY",

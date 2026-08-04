@@ -36,10 +36,15 @@ async function list({ from, to, instrumentId, kind, status, portfolioId } = {}) 
   if (portfolioId) {
     // Solo strumenti che il portafoglio ha effettivamente movimentato: un
     // calendario che mostra cedole di titoli mai comprati è rumore.
+    //
+    // `IN (subquery)` invece di `EXISTS` correlato: Postgres pianifica entrambi come
+    // semi-join, ma la sottoquery non correlata è portabile — pg-mem, usato dai test
+    // locali, non risolve gli alias esterni dentro un EXISTS.
     params.push(portfolioId);
     where.push(
-      `EXISTS (SELECT 1 FROM transactions t
-                WHERE t.instrument_id = e.instrument_id AND t.portfolio_id = $${params.length})`
+      `e.instrument_id IN (SELECT t.instrument_id FROM transactions t
+                            WHERE t.portfolio_id = $${params.length}
+                              AND t.instrument_id IS NOT NULL)`
     );
   }
 

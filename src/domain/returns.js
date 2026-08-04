@@ -116,9 +116,22 @@ function inflowsByDate(flows) {
   return map;
 }
 
-/** Investito netto cumulato = -Σ net_amount, per data ascendente. */
+/**
+ * Tipi che contano come CAPITALE INVESTITO.
+ *
+ * Deliberatamente SENZA i redditi: incassare un dividendo non riduce quanto hai
+ * investito, quindi la linea "investito netto" del grafico non deve scendere quando
+ * arriva una cedola. I redditi restano invece flussi esterni a pieno titolo per TWR
+ * e XIRR, dove un incasso È un'uscita dal portafoglio — sono due aggregazioni
+ * diverse della stessa lista di flussi, e confonderle fa scendere la linea
+ * dell'investito a ogni stacco.
+ */
+const CAPITAL_TYPES = new Set(["BUY", "SELL", "FEE", "TAX", "RETURN_OF_CAPITAL"]);
+
+/** Investito netto cumulato = -Σ net_amount sui soli flussi di CAPITALE. */
 function netInvestedSeries(flows, dates) {
-  const byDate = aggregateFlows(flows);
+  const capital = (flows || []).filter((f) => !f.type || CAPITAL_TYPES.has(f.type));
+  const byDate = aggregateFlows(capital);
   const out = [];
   let acc = ZERO;
   const sorted = [...byDate.keys()].sort(cal.cmp);
@@ -315,6 +328,7 @@ function byYear(points, flows, opts = {}) {
 
 module.exports = {
   DAYS_PER_YEAR,
+  CAPITAL_TYPES,
   simpleReturn,
   twr,
   aggregateFlows,

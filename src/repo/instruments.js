@@ -1,6 +1,7 @@
 const { query } = require("../db/pool");
 const rows = require("./rows");
 const { normalizeDate } = require("../domain/calendar");
+const { inList } = require("./sqlUtil");
 
 const COLS = `id, asset_class, name, ticker, isin, exchange, currency, price_source,
   quote_convention, face_value, coupon_rate, coupon_frequency, first_coupon_date,
@@ -44,7 +45,11 @@ async function byId(id) {
 
 async function byIds(ids) {
   if (!ids || ids.length === 0) return [];
-  const { rows: r } = await query(`SELECT ${COLS} FROM instruments WHERE id = ANY($1::int[])`, [ids]);
+  const params = [];
+  const { rows: r } = await query(
+    `SELECT ${COLS} FROM instruments WHERE id ${inList(params, ids)}`,
+    params
+  );
   return r.map(rows.instrument);
 }
 
