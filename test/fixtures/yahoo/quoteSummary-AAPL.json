@@ -1,0 +1,69 @@
+{
+  "summaryDetail": {
+    "maxAge": 1,
+    "priceHint": 2,
+    "previousClose": 303.42,
+    "open": 302.725,
+    "dayLow": 301.32,
+    "dayHigh": 307.14,
+    "regularMarketPreviousClose": 303.42,
+    "regularMarketOpen": 302.725,
+    "regularMarketDayLow": 301.32,
+    "regularMarketDayHigh": 307.14,
+    "dividendRate": 1.08,
+    "dividendYield": 0.0034999999,
+    "exDividendDate": "2026-08-10T00:00:00.000Z",
+    "payoutRatio": 0.1204,
+    "fiveYearAvgDividendYield": 0.5,
+    "beta": 1.086,
+    "trailingPE": 35.808994,
+    "forwardPE": 32.22146,
+    "volume": 23484270,
+    "regularMarketVolume": 23484270,
+    "averageVolume": 56631477,
+    "averageVolume10days": 58654020,
+    "averageDailyVolume10Day": 58654020,
+    "bid": 302.88,
+    "ask": 305.98,
+    "bidSize": 3000,
+    "askSize": 400,
+    "marketCap": 4473481068544,
+    "nonDilutedMarketCap": 4537071141960,
+    "fiftyTwoWeekLow": 202.16,
+    "fiftyTwoWeekHigh": 344.57,
+    "allTimeHigh": 344.57,
+    "allTimeLow": 0.049107,
+    "priceToSalesTrailing12Months": 9.582821,
+    "fiftyDayAverage": 309.4994,
+    "twoHundredDayAverage": 277.9605,
+    "trailingAnnualDividendRate": 1.05,
+    "trailingAnnualDividendYield": 0.0034605495,
+    "currency": "USD",
+    "fromCurrency": null,
+    "toCurrency": null,
+    "lastMarket": null,
+    "coinMarketCapLink": null,
+    "algorithm": null,
+    "tradeable": false
+  },
+  "calendarEvents": {
+    "maxAge": 1,
+    "earnings": {
+      "earningsDate": [
+        "2026-10-29T20:00:00.000Z"
+      ],
+      "earningsCallDate": [
+        "2026-07-30T20:00:00.000Z"
+      ],
+      "isEarningsDateEstimate": true,
+      "earningsAverage": 1.97643,
+      "earningsLow": 1.93,
+      "earningsHigh": 2.04,
+      "revenueAverage": 113256580210,
+      "revenueLow": 112137000000,
+      "revenueHigh": 115068279000
+    },
+    "exDividendDate": "2026-08-10T00:00:00.000Z",
+    "dividendDate": "2026-08-13T00:00:00.000Z"
+  }
+}

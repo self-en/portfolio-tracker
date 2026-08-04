@@ -7,7 +7,33 @@ on:
     branches: ["**"]
 
 jobs:
+  # Gate sui test PRIMA della build. La suite non richiede né database né rete (i
+  # test di repo girano su pg-mem, quelli di dominio non hanno I/O, quelli live sono
+  # opt-in dietro LIVE=1), quindi costa poco e impedisce che un'immagine rotta
+  # raggiunga l'env di branch.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      # --include=dev esplicito: se NODE_ENV=production fosse impostata nel runner,
+      # npm salterebbe in silenzio pg-mem e vite, e i test fallirebbero con un
+      # MODULE_NOT_FOUND che non spiega la causa.
+      - run: npm ci --include=dev
+      - run: npm test
+      - run: ./scripts/check-no-console.sh
+
+      # La build della SPA è parte del contratto: se non compila, l'immagine
+      # verrebbe pubblicata senza frontend.
+      - run: npm --prefix web ci --include=dev
+      - run: npm --prefix web run build
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

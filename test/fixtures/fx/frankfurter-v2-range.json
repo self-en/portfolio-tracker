@@ -1,0 +1,62 @@
+[
+  {
+    "date": "2026-07-30",
+    "base": "EUR",
+    "quote": "GBP",
+    "rate": 0.85747
+  },
+  {
+    "date": "2026-07-30",
+    "base": "EUR",
+    "quote": "USD",
+    "rate": 1.1448
+  },
+  {
+    "date": "2026-07-31",
+    "base": "EUR",
+    "quote": "GBP",
+    "rate": 0.85641
+  },
+  {
+    "date": "2026-07-31",
+    "base": "EUR",
+    "quote": "USD",
+    "rate": 1.1501
+  },
+  {
+    "date": "2026-08-01",
+    "base": "EUR",
+    "quote": "GBP",
+    "rate": 0.85621
+  },
+  {
+    "date": "2026-08-01",
+    "base": "EUR",
+    "quote": "USD",
+    "rate": 1.1505
+  },
+  {
+    "date": "2026-08-02",
+    "base": "EUR",
+    "quote": "GBP",
+    "rate": 0.8563
+  },
+  {
+    "date": "2026-08-02",
+    "base": "EUR",
+    "quote": "USD",
+    "rate": 1.1507
+  },
+  {
+    "date": "2026-08-03",
+    "base": "EUR",
+    "quote": "GBP",
+    "rate": 0.85627
+  },
+  {
+    "date": "2026-08-03",
+    "base": "EUR",
+    "quote": "USD",
+    "rate": 1.152
+  }
+]

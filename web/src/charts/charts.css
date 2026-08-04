@@ -1,0 +1,671 @@
+/* Stili di Fase 8/9: grafici, tessere KPI, agenda del calendario.
+ *
+ * Vive in charts/ perché è l'unico foglio di stile che questa fase può
+ * aggiungere: styles.css è di un altro proprietario. Qui NON compare un solo
+ * hex — i colori di chrome arrivano dalle custom properties di styles.css e
+ * quelli delle SERIE arrivano da chartTheme.js via style inline, che è l'unico
+ * modo per farli entrare in un SVG.
+ *
+ * Prefisso `pt-` su tutte le classi per non collidere con le classi semantiche
+ * già esistenti (.card, .table, .badge, .num…), che invece vengono riusate. */
+
+/* ---------- contenitore di un grafico ---------- */
+.pt-chart {
+  margin: 0;
+  padding: calc(var(--gap) * 1.25);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  /* Nessuna altezza fissa: il contenitore cresce con la fascia dell'asse x, così
+     la card non sviluppa mai uno scroll verticale annidato. */
+}
+
+.pt-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.pt-chart-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.pt-chart-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.pt-chart-badges {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pt-chart-note {
+  margin: 0.6rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.pt-plot {
+  position: relative;
+  margin-top: 0.75rem;
+}
+
+/* Refetch: si tiene il render precedente a opacità ridotta, senza skeleton e
+   senza salti di layout. */
+.pt-plot--refetching {
+  opacity: 0.55;
+  transition: opacity 120ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-plot--refetching {
+    transition: none;
+  }
+}
+
+/* Ricorda: la griglia e gli assi sono recessivi, mai tratteggiati. */
+.pt-plot .recharts-cartesian-axis-line,
+.pt-plot .recharts-cartesian-grid line {
+  shape-rendering: crispEdges;
+}
+
+.pt-plot .recharts-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- legenda ---------- */
+.pt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  /* Il TESTO indossa un token di testo: l'identità la porta il segno colorato. */
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.pt-legend-note {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+/* ---------- tooltip ---------- */
+.pt-tooltip {
+  min-width: 11rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+.pt-tooltip-title {
+  margin: 0 0 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.pt-tooltip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.pt-tooltip-row + .pt-tooltip-row {
+  margin-top: 0.15rem;
+}
+
+/* Il valore guida, l'etichetta segue. */
+.pt-tooltip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--text);
+  margin-left: auto;
+}
+
+.pt-tooltip-label {
+  color: var(--text-muted);
+}
+
+.pt-tooltip-flag {
+  margin: 0.35rem 0 0;
+  color: var(--warn-text);
+  background: var(--warn-surface);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.35rem;
+  font-size: 0.75rem;
+}
+
+/* ---------- vista tabellare (il gemello accessibile di ogni grafico) ---------- */
+.pt-tableview {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.pt-tableview > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.pt-tableview > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pt-tableview .table-wrap {
+  margin-top: 0.5rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+/* ---------- barra di allocazione in stack ---------- */
+.pt-allocbar {
+  display: flex;
+  /* Il gap di 2px in colore superficie è ciò che separa i segmenti: mai un bordo
+     disegnato attorno alla marca. */
+  gap: 2px;
+  width: 100%;
+  height: 44px;
+  margin-top: 0.5rem;
+}
+
+.pt-allocbar-seg {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  cursor: default;
+  overflow: visible;
+}
+
+.pt-allocbar-seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pt-allocbar-label {
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  /* Nessun overflow:hidden: l'etichetta si stampa solo se MISURA di starci. */
+}
+
+.pt-allocbar-tip {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: left;
+}
+
+.pt-allocbar-empty {
+  height: 44px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 3px;
+}
+
+/* ---------- KPI ---------- */
+.pt-kpi {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  margin-bottom: var(--gap);
+}
+
+.pt-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: calc(var(--gap) * 1.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+
+.pt-tile-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.pt-tile-value {
+  font-size: 1.6rem;
+  font-weight: 650;
+  line-height: 1.15;
+  /* Cifre PROPORZIONALI: tabular-nums su un numero grande e isolato lo fa
+     sembrare slabbrato. Le colonne di numeri stanno nella tabella. */
+  font-variant-numeric: proportional-nums;
+}
+
+/* La cifra eroe: una sola per vista, ≥48px, stesso sans di tutto il resto. */
+.pt-tile-value--hero {
+  font-size: 48px;
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  overflow-wrap: break-word;
+}
+
+.pt-tile-delta {
+  font-size: 0.9rem;
+  font-variant-numeric: proportional-nums;
+}
+
+.pt-tile-delta-label {
+  color: var(--text-muted);
+}
+
+.pt-tile-sub {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.pt-tile-spark {
+  margin-top: 0.4rem;
+  min-height: 34px;
+}
+
+.pt-tile--hero {
+  grid-row: span 1;
+}
+
+/* ---------- pannello rendimenti ---------- */
+.pt-returns {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: 1fr 1fr;
+}
+
+.pt-returns-cell {
+  padding: var(--gap);
+  background: var(--surface-inset);
+  border-radius: var(--radius-sm);
+}
+
+.pt-returns-metric {
+  font-size: 1.8rem;
+  font-weight: 650;
+  line-height: 1.15;
+  font-variant-numeric: proportional-nums;
+}
+
+.pt-returns-note {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.pt-disclaimer {
+  margin: var(--gap) 0 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+/* ---------- agenda del calendario ---------- */
+.pt-monthstrip {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  margin-bottom: var(--gap);
+  scrollbar-width: thin;
+}
+
+.pt-monthchip {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pt-monthchip:hover {
+  background: var(--surface-inset);
+}
+
+.pt-monthchip--current {
+  border-color: var(--accent);
+}
+
+.pt-monthchip-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.pt-monthchip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.pt-agenda {
+  display: grid;
+  gap: calc(var(--gap) * 1.25);
+}
+
+.pt-agenda-month {
+  scroll-margin-top: 5rem;
+}
+
+.pt-agenda-monthhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+.pt-agenda-monthname {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.pt-agenda-monthtotal {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.pt-agenda-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pt-agenda-item {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pt-agenda-date {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+
+.pt-agenda-main {
+  min-width: 0;
+}
+
+.pt-agenda-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pt-agenda-meta {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.pt-agenda-amounts {
+  text-align: right;
+}
+
+.pt-agenda-gross {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.pt-agenda-unit {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Confidenza: PIENO vs TRATTEGGIATO, sempre accompagnato dall'etichetta
+   testuale. Il tratteggio non è decorazione, dice "non è ancora un incasso". */
+.pt-conf {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.pt-conf-mark {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.pt-conf-mark--solid {
+  background: currentColor;
+  border: 1px solid currentColor;
+}
+
+.pt-conf-mark--dashed {
+  background: none;
+  border: 1px dashed currentColor;
+}
+
+/* ---------- dialogo di conferma ---------- */
+.pt-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: var(--gap);
+  background: rgb(0 0 0 / 45%);
+  overflow-y: auto;
+}
+
+.pt-dialog {
+  width: min(30rem, 100%);
+  max-height: calc(100vh - 2 * var(--gap));
+  overflow-y: auto;
+  padding: calc(var(--gap) * 1.25);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.pt-dialog h2 {
+  margin-top: 0;
+}
+
+.pt-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: var(--gap);
+}
+
+.pt-dialog-summary {
+  margin: 0 0 var(--gap);
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  font-size: 0.88rem;
+}
+
+.pt-dialog-net {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.35rem;
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.pt-radio {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.pt-hint {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+/* ---------- griglie di pagina ---------- */
+.pt-cols {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: var(--gap);
+}
+
+.pt-stack {
+  display: grid;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.pt-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+}
+
+.pt-filterbar {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: var(--gap);
+}
+
+.pt-filterbar-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-right: 0.25rem;
+}
+
+.pt-chip--on {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pt-cell-sub {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.pt-rowbadges {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-left: 0.35rem;
+}
+
+/* ---------- 390px ---------- */
+@media (max-width: 900px) {
+  .pt-kpi {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pt-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .pt-kpi,
+  .pt-returns {
+    grid-template-columns: 1fr;
+  }
+
+  .pt-tile-value--hero {
+    font-size: 48px;
+  }
+
+  .pt-agenda-item {
+    grid-template-columns: 1fr auto;
+  }
+
+  .pt-agenda-date {
+    order: 1;
+  }
+
+  .pt-agenda-conf {
+    order: 2;
+    justify-self: end;
+  }
+
+  .pt-agenda-main {
+    order: 3;
+    grid-column: 1 / -1;
+  }
+
+  .pt-agenda-amounts {
+    order: 4;
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .pt-agenda-actions {
+    order: 5;
+    grid-column: 1 / -1;
+  }
+
+  .pt-allocbar {
+    height: 52px;
+  }
+}
