@@ -614,3 +614,586 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================================
+   Fase 7 — movimenti e strumenti
+   Aggiunte in fondo: i token e le classi di base sopra non vengono riscritti.
+   ========================================================================== */
+
+/* ---------- intestazione di pagina ---------- */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.detail-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.row--tight {
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.badge--fresh {
+  border-color: var(--border);
+}
+
+.badge--calc {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-weak);
+}
+
+/* ---------- badge dei tipi di movimento ----------
+   Il colore non è l'unico portatore di significato: l'etichetta è sempre scritta
+   per esteso, quindi il badge resta leggibile anche senza distinguere le tinte. */
+.badge--tx {
+  font-weight: 600;
+}
+
+.badge--tx-buy,
+.badge--tx-sell {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.badge--tx-sell {
+  background: var(--surface);
+}
+
+.badge--tx-income {
+  border-color: var(--up);
+  color: var(--up);
+  background: transparent;
+}
+
+.badge--tx-cost {
+  border-color: var(--down);
+  color: var(--down);
+  background: transparent;
+}
+
+.badge--tx-cash {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-weak);
+}
+
+/* ---------- bottoni aggiuntivi ---------- */
+.btn--danger {
+  background: var(--danger-text);
+  border-color: var(--danger-text);
+  color: var(--text-inverse);
+}
+
+.btn--danger-ghost {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+
+.btn--chip-active {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- filtri ---------- */
+.filterbar {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: var(--gap);
+  padding: 0.9rem;
+}
+
+.filterbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.filterbar-reset {
+  margin-left: auto;
+}
+
+.range-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.range-presets {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.range-dates {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ---------- form ---------- */
+.field--inline {
+  margin-bottom: 0;
+}
+
+.field--grow {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.field--wide {
+  grid-column: 1 / -1;
+}
+
+.field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-hint,
+.field-error {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.field-hint {
+  color: var(--text-muted);
+}
+
+.field-error {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0 var(--gap);
+}
+
+.form-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  margin: 0 0 var(--gap);
+}
+
+.form-section legend {
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.form-note {
+  margin: 0 0 var(--gap);
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-weak);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+
+.form-note--warn {
+  border-left-color: var(--warn-border);
+  background: var(--warn-surface);
+  color: var(--warn-text);
+}
+
+.form-actions {
+  justify-content: flex-end;
+  margin-top: var(--gap);
+}
+
+.readonly-value {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.2rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+}
+
+.tx-form textarea.input {
+  resize: vertical;
+}
+
+/* ---------- pannello anteprima ---------- */
+.preview {
+  margin-top: var(--gap);
+  padding: 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.preview--idle {
+  border-style: dashed;
+  background: transparent;
+}
+
+.preview--loading {
+  /* Il pannello resta leggibile mentre si ricalcola: sparire e ricomparire a ogni
+     battitura sarebbe peggio di un valore vecchio di 400 ms. */
+  opacity: 0.85;
+}
+
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.preview-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.preview-subtitle {
+  margin: var(--gap) 0 0.4rem;
+  font-size: 0.9rem;
+}
+
+.preview-warnings {
+  margin-bottom: 0.5rem;
+}
+
+.preview-warnings-title {
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+  color: var(--warn-text);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.6rem var(--gap);
+  margin: 0;
+}
+
+.preview-grid dt {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.preview-grid dd {
+  margin: 0.1rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.table--compact th,
+.table--compact td {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* ---------- drawer e modale ---------- */
+.drawer-root,
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(8 12 18 / 45%);
+}
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(46rem, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 0.9rem var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.drawer-subtitle {
+  margin: 0.15rem 0 0;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--gap);
+}
+
+.drawer-footer {
+  padding: 0.75rem var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+.modal-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.modal-message {
+  margin: 0 0 0.5rem;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+  margin-top: var(--gap);
+}
+
+/* ---------- ricerca simbolo ---------- */
+.symbol-search {
+  margin-bottom: var(--gap);
+}
+
+.search-unavailable {
+  margin: 0 0 var(--gap);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-sm);
+  background: var(--warn-surface);
+  color: var(--warn-text);
+  font-size: 0.9rem;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0 0 var(--gap);
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.search-result {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result:hover {
+  background: var(--surface-inset);
+}
+
+.search-symbol {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-name {
+  font-size: 0.9rem;
+}
+
+/* ---------- tabelle: celle e stati ---------- */
+.cell-right {
+  text-align: right;
+}
+
+.cell-instrument {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.cell-instrument-name {
+  font-weight: 600;
+}
+
+.cell-quote,
+.cell-costs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.table-status {
+  padding: calc(var(--gap) * 2);
+  display: flex;
+  justify-content: center;
+}
+
+.error-title {
+  margin: 0 0 0.3rem;
+  font-weight: 700;
+}
+
+.list-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 0.75rem 0;
+  flex-wrap: wrap;
+}
+
+/* ---------- dettaglio strumento ---------- */
+.grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  margin-bottom: var(--gap);
+}
+
+.card-title {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.card + .card,
+section.card {
+  margin-bottom: var(--gap);
+}
+
+.card--accent {
+  border-color: var(--accent);
+}
+
+.detail-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0 0 var(--gap);
+}
+
+.detail-list--inline {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 40%) 1fr;
+  gap: 0.5rem;
+}
+
+.detail-row dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.detail-row dd {
+  margin: 0;
+}
+
+.manual-price {
+  margin: 0;
+}
+
+/* ---------- 390px ---------- */
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filterbar-reset {
+    margin-left: 0;
+  }
+
+  /* Sotto i 640px le righe della tabella diventano schede: l'intestazione di
+     colonna riappare come etichetta della cella (data-label), così non serve un
+     secondo markup per il mobile. */
+  .table thead {
+    display: none;
+  }
+
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: auto;
+  }
+
+  .table tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .table td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--gap);
+    border: 0;
+    padding: 0.2rem 0.6rem;
+    text-align: right;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: left;
+  }
+
+  .table td.cell-optional {
+    display: none;
+  }
+
+  .detail-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .drawer {
+    width: 100%;
+    border-left: 0;
+  }
+}
