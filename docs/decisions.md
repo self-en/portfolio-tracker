@@ -176,6 +176,19 @@ matematica verificabile senza Postgres (che in locale non c'è).
   serviti su `http://` semplice e un cookie `Secure` viene scartato in silenzio
   dal browser, producendo login 204 seguito da 401 su tutto, senza nulla nei log.
   `COOKIE_SECURE=true` il giorno in cui la piattaforma aggiunge TLS.
+- **Tre direttive che assumono HTTPS vanno tutte disattivate**, non solo la prima.
+  Sono la stessa trappola con tre facce, e le ultime due sono ancora più subdole
+  del cookie perché rompono la pagina *prima* che l'app riceva una richiesta:
+
+  | Cosa | Dove | Se attiva su HTTP |
+  | --- | --- | --- |
+  | `Secure` sul cookie | `src/config.js` | login 204, poi 401 su tutto |
+  | `hsts` | `src/app.js` (helmet) | il browser cerca https per mesi |
+  | `upgrade-insecure-requests` | `src/app.js` (helmet, **default ON**) | pagina bianca: ogni asset richiesto in https |
+
+  `upgradeInsecureRequests: null` è obbligatorio nella CSP: helmet la include per
+  default, e ordina al browser di riscrivere in https ogni richiesta della pagina.
+  Su un host senza TLS il risultato è una SPA che non carica nulla.
 - Il database del branch viene distrutto con il branch → `GET /api/export` e
   `POST /api/import` non sono opzionali: sono l'unica rete di sicurezza per dati
   inseriti a mano.

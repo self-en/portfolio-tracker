@@ -32,6 +32,14 @@ function buildApp() {
           baseUri: ["'self'"],
           frameAncestors: ["'none'"],
           formAction: ["'self'"],
+          // upgrade-insecure-requests DISATTIVATO (helmet lo mette per default).
+          //
+          // Stessa trappola del cookie Secure, e altrettanto silenziosa: gli env di
+          // branch sono serviti su http:// semplice, e questa direttiva ordina al
+          // browser di riscrivere in https OGNI richiesta della pagina. Su un host
+          // senza TLS il risultato è una pagina bianca con tutti gli asset falliti.
+          // Va riattivata il giorno in cui la piattaforma aggiunge TLS.
+          upgradeInsecureRequests: null,
         },
       },
       // Gli env di branch sono su http:// semplice: HSTS manderebbe il browser a
