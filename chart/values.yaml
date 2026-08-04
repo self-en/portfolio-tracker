@@ -8,11 +8,10 @@ image:
 replicaCount: 1
 
 # Configurazione dell'app.
+# APP_PASSWORD e SESSION_SECRET non sono qui e non devono esserci: sono segreti,
+# si impostano dalla pagina "Configurazione" del progetto in nedo (dichiarate in
+# self-en.json) e arrivano al pod come Secret via envFrom. Vedi deployment.yaml.
 app:
-  # Secret del namespace che porta le chiavi `app-password` e `session-secret`.
-  # Vuoto = <release>-auth. Se il Secret non esiste, il pod parte comunque in
-  # "locked mode" (vedi deployment.yaml).
-  secretName: ""
   # false perché gli env di branch sono http:// semplice: un cookie Secure viene
   # scartato in silenzio dal browser. Vedi docs/decisions.md §10.
   cookieSecure: false
@@ -73,3 +72,10 @@ postgres:
   appUser: ""
   appPassword: ""
   adminPassword: ""
+
+# Configurazione applicativa (variabili d'ambiente) gestita dalla UI di nedo:
+# base64 di un oggetto JSON {CHIAVE: valore}, riempito per-branch
+# dall'ApplicationSet. Vuoto = nessun Secret, nessun envFrom.
+# NON mettere segreti qui: finirebbero in git.
+appEnv:
+  encoded: ""

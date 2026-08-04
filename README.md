@@ -95,17 +95,27 @@ leggibile nella UI, quindi degradare in modo diagnosticabile è preferibile.
 | `MARKET_PROVIDER`|      no      | `yahoo` | `manual` disattiva ogni chiamata di rete                   |
 | `BACKFILL_YEARS` |      no      | `2`     | ampiezza dello storico quando non ci sono transazioni      |
 
-### Creare il Secret nell'env del branch
+### Impostare i segreti (dalla pagina Configurazione)
 
-Il deployment legge `APP_PASSWORD` e `SESSION_SECRET` da un Secret del namespace,
-con `optional: true` (Secret assente → locked mode, non crashloop):
+`APP_PASSWORD` e `SESSION_SECRET` si impostano dal pannello **nedo**: apri il
+progetto → **Configurazione**, compila i due campi (c'è un pulsante "genera") e
+salva. La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non
+passano da questo repository, e la versione riparte da sola.
 
-```bash
-kubectl -n <namespace-env> create secret generic <release>-auth \
-  --from-literal=app-password='...' \
-  --from-literal=session-secret="$(openssl rand -hex 32)"
-kubectl -n <namespace-env> rollout restart deploy/<release>
-```
+Le due variabili sono dichiarate in [`self-en.json`](self-en.json), che è ciò che
+fa comparire etichetta, descrizione e pulsante "genera" nel form: se in futuro
+l'app avrà bisogno di un'altra variabile, va aggiunta lì nello stesso commit.
+Ogni variabile può valere per tutte le versioni o solo per la produzione.
+
+Finché i valori non sono impostati l'app resta in **locked mode** (503
+`not_configured` su `/api/*`, `/healthz` 200), non in crashloop: un crashloop su
+questa piattaforma non lascia log leggibili nella UI.
+
+Non aggiungere quei valori a `chart/values.yaml` (finirebbero in git) e non
+dichiararli come `env:` nel Deployment: un `env:` esplicito **vince** su
+`envFrom`, quindi zittirebbe in silenzio quello che imposti dalla UI. È
+esattamente il wiring che questo repo aveva prima (un Secret `<release>-auth`
+creato a mano) e che è stato rimosso.
 
 > ### ⚠️ La trappola del cookie `Secure`
 > Gli env di branch sono serviti su **`http://` semplice** (`httproute.yaml` non ha

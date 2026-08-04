@@ -23,6 +23,14 @@ spec:
       containers:
       - name: app
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        {{- if (.Values.appEnv | default dict).encoded }}
+        # self-en-app-env: variabili configurate dalla UI di nedo (vedi
+        # app-env-secret.yaml). Il nome del Secret porta l'hash del contenuto,
+        # cosi' un cambio di configurazione fa ripartire davvero i pod.
+        envFrom:
+        - secretRef:
+            name: {{ .Release.Name }}-env-{{ (.Values.appEnv | default dict).encoded | sha256sum | trunc 10 }}
+        {{- end }}
         # Always re-check the registry on (re)start so a new digest behind the
         # pinned tag is picked up.
         imagePullPolicy: Always
@@ -42,26 +50,15 @@ spec:
           value: {{ .Release.Name | quote }}
         - name: LOG_LEVEL
           value: {{ .Values.app.logLevel | quote }}
-        # Auth a password singola. Sorgente: un Secret nel namespace dell'env
-        # (`kubectl create secret generic <release>-auth ...`, vedi README).
-        # optional: true di proposito: se il Secret non c'è il pod parte comunque
-        # ed entra in "locked mode" (503 not_configured su /api/*, /healthz 200),
-        # perché un crashloop su questa piattaforma non lascia log leggibili nella
-        # UI. Nessuna password di default, e nessun crash.
-        - name: APP_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.app.secretName | default (printf "%s-auth" .Release.Name) | quote }}
-              key: app-password
-              optional: true
-        # NON auto-generata dall'app: una SESSION_SECRET rigenerata a ogni deploy
-        # invaliderebbe in silenzio ogni sessione, nascondendo la misconfigurazione.
-        - name: SESSION_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.app.secretName | default (printf "%s-auth" .Release.Name) | quote }}
-              key: session-secret
-              optional: true
+        # APP_PASSWORD e SESSION_SECRET NON stanno più qui: arrivano dall'envFrom
+        # sopra, cioè dalla pagina "Configurazione" del progetto in nedo (sono
+        # dichiarate in self-en.json, con etichetta e pulsante "genera").
+        # Erano due `env:` con secretKeyRef verso un Secret da creare a mano: se
+        # fossero rimaste avrebbero VINTO su envFrom (in Kubernetes un `env:`
+        # esplicito ha la precedenza), quindi i valori impostati dalla UI sarebbero
+        # stati ignorati in silenzio. Il comportamento in assenza di valori non
+        # cambia: nessun Secret ⇒ variabili assenti ⇒ "locked mode" (503
+        # not_configured su /api/*, /healthz 200), non un crashloop.
         # Gli env di branch sono serviti su http:// semplice (httproute.yaml non ha
         # configurazione TLS) e un cookie Secure viene SCARTATO IN SILENZIO dal
         # browser: login 204, poi 401 su ogni richiesta, senza nulla nei log.

@@ -1,0 +1,21 @@
+{
+  "contract": 1,
+  "env": [
+    {
+      "key": "APP_PASSWORD",
+      "label": "Password di accesso all'app",
+      "description": "L'unica password per entrare: chi la conosce vede il portafoglio. Senza, l'app resta bloccata.",
+      "required": true,
+      "secret": true,
+      "generate": "password"
+    },
+    {
+      "key": "SESSION_SECRET",
+      "label": "Segreto delle sessioni",
+      "description": "Firma i cookie di chi ha fatto login. Generalo una volta e non cambiarlo senza motivo: cambiandolo, tutti vengono disconnessi.",
+      "required": true,
+      "secret": true,
+      "generate": "secret32"
+    }
+  ]
+}
