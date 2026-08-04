@@ -323,6 +323,68 @@ test("valuePositions: una posizione CHIUSA senza quotazione non genera warning",
   assert.deepEqual(r.warnings, [], "niente da valorizzare, niente da segnalare");
 });
 
+test("valuePositions: cambio mancante su valuta estera → warning, non conversione 1:1", () => {
+  // Senza warning, una posizione in USD verrebbe sommata al totale in EUR come se il
+  // cambio fosse 1 — un errore del 15% che non somiglia a un errore.
+  const USD = { ...EQUITY, currency: "USD" };
+  const txs = [
+    tx({ type: "BUY", trade_date: "2026-01-01", quantity: "10", price: "100", trade_ccy: "USD", fx_rate: "1.25", net_amount: "-1000" }),
+  ];
+  const instruments = new Map([[1, USD]]);
+  const built = pos.buildPositions(txs, { instruments });
+  const r = val.valuePositions({
+    asOf: "2026-06-01",
+    built,
+    instruments,
+    quotes: new Map([[1, { price: "110" }]]),
+    fxRates: new Map(), // nessun cambio disponibile
+  });
+  const w = r.warnings.find((x) => x.code === "fx_missing");
+  assert.ok(w, "deve segnalare il cambio mancante");
+  assert.equal(w.currency, "USD");
+  assert.equal(w.instrumentId, 1);
+});
+
+test("valuePositions: il rateo obbligazionario entra nei totali solo con includeAccrued", () => {
+  const BOND = {
+    id: 1,
+    name: "BTP",
+    assetClass: "BOND",
+    currency: "EUR",
+    quoteConvention: "PCT_OF_NOMINAL",
+    faceValue: "1000",
+    couponRate: "0.0345",
+    couponFrequency: 2,
+    firstCouponDate: "2025-01-01",
+    maturityDate: "2030-07-01",
+    dayCount: "ACT/ACT-ICMA",
+  };
+  const txs = [
+    tx({ type: "BUY", trade_date: "2026-01-01", quantity: "10", price: "98.5", net_amount: "-9850" }),
+  ];
+  const instruments = new Map([[1, BOND]]);
+  const built = pos.buildPositions(txs, { instruments });
+  const args = {
+    asOf: "2026-04-02",
+    built,
+    instruments,
+    quotes: new Map([[1, { price: "99" }]]),
+  };
+
+  const secco = val.valuePositions(args);
+  const telQuel = val.valuePositions({ ...args, includeAccrued: true });
+
+  // Il rateo è SEMPRE calcolato e riportato a parte…
+  assert.ok(num(secco.totals.accruedInterest) > 0);
+  assert.equal(num(secco.rows[0].accruedInterest), num(secco.totals.accruedInterest));
+  // …ma entra nel totale solo su richiesta (corso tel quel invece che secco).
+  assert.equal(num(secco.totals.totalValue), num(secco.totals.marketValue));
+  assert.equal(
+    num(telQuel.totals.totalValue),
+    num(telQuel.totals.marketValue) + num(telQuel.totals.accruedInterest)
+  );
+});
+
 test("allocate raggruppa e pesa, ordinando per valore decrescente", () => {
   const txs = [
     tx({ instrument_id: 1, type: "BUY", trade_date: "2026-01-01", quantity: "10", price: "100", net_amount: "-1000" }),
