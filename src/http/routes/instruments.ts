@@ -11,7 +11,6 @@ import { errCode, errMessage } from "../../util/err";
 import { enqueueBackfill } from "../../market/refresher";
 import type { FastifyPluginAsync } from "fastify";
 import type { Instrument } from "../../types";
-import type { IncomeEventInput } from "../../repo/events";
 
 
 /** Il rateo obbligazionario e lo scadenzario sono utili nella risposta, non solo in UI. */
@@ -66,7 +65,7 @@ async function regenerateProjected(inst: Instrument) {
       currency: inst.currency,
       source: "schedule",
     }));
-    const n = await eventsRepo.replaceProjected(inst.id, events as IncomeEventInput[]);
+    const n = await eventsRepo.replaceProjected(inst.id, events);
     logger.info({ instrumentId: inst.id, events: n }, "[instruments] cedole proiettate rigenerate");
     return n;
   } catch (err) {

@@ -166,13 +166,24 @@ async function upsertMany(events: IncomeEventInput[] | null | undefined): Promis
 }
 
 /**
+ * Un evento da proiettare NON porta `instrumentId`: glielo impone
+ * `replaceProjected` dal proprio parametro (vedi `{ ...e, instrumentId }` più
+ * sotto). Chiederlo anche dentro l'evento significava far dichiarare ai chiamanti
+ * un campo che viene sovrascritto — e costringerli a un cast per riuscirci.
+ */
+export type ProjectedEventInput = Omit<IncomeEventInput, "instrumentId">;
+
+/**
  * Rigenera le cedole proiettate di uno strumento: si cancellano le PROJECTED non
  * ancora collegate a una transazione e si reinseriscono dallo scadenzario.
  *
  * `transaction_id IS NULL` è la guardia importante: un evento confermato
  * dall'utente non deve mai essere cancellato da una rigenerazione.
  */
-async function replaceProjected(instrumentId: number, events: IncomeEventInput[]): Promise<number> {
+async function replaceProjected(
+  instrumentId: number,
+  events: ProjectedEventInput[]
+): Promise<number> {
   return withTransaction(async (client) => {
     await client.query(
       `DELETE FROM income_events

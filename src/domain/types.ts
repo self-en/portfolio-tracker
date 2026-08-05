@@ -103,6 +103,22 @@ export interface DomainWarning {
   instrumentName?: string | null;
   ticker?: string | null;
   priceDate?: DateString | null;
+  /**
+   * Solo per `oversell`: quanto si è provato a vendere e quanto c'era in carico.
+   * Sono i due numeri che rendono il warning azionabile invece di solo allarmante,
+   * e li leggono sia la UI sia i test — quindi vivono nel tipo, non solo
+   * nell'oggetto che positions.ts costruisce.
+   */
+  requested?: DecimalString;
+  available?: DecimalString;
+  /**
+   * L'INTERVALLO di un buco nella serie (`price_missing`/`fx_missing` prodotti da
+   * `valueSeries`, che accorpa i giorni contigui in un warning solo). Non sono
+   * decorativi: il messaggio stesso è costruito da questi tre campi.
+   */
+  from?: DateString;
+  to?: DateString;
+  days?: number;
 }
 
 /** Tasso EUR->ccy alla data, dalla cache. null/'' = non disponibile. */
@@ -154,10 +170,24 @@ export interface SeriesPoint {
   /** true quando il punto e' stato calcolato con dati incompleti. */
   partial?: boolean;
   netInvested?: Decimal | DecimalString | number | null;
+  // I tre campi che `valueSeries` mette su OGNI punto che produce. Sono opzionali
+  // perche' altri produttori di serie (twr, byYear) ne passano solo `date`/`value`,
+  // ma senza dichiararli qui il tipo diceva meno di quello che la funzione
+  // restituisce, e un lettore legittimo di `cost` non compilava.
+  cost?: Decimal | DecimalString | number | null;
+  accrued?: Decimal | DecimalString | number | null;
+  /** Utile/perdita rispetto all'INVESTITO NETTO, non al solo carico. */
+  pnl?: Decimal | DecimalString | number | null;
 }
 
 /** Un cashflow ridotto a "quanto" e "a quanti giorni dall'inizio": la forma su cui lavora XIRR. */
 export interface DayFlow {
-  amount: Decimal;
+  /**
+   * Come ogni altro importo del progetto: anche una STRINGA decimale, non solo un
+   * Decimal. `npv`/`npvDerivative` lo passano comunque da `d()`, e pretendere un
+   * Decimal costringeva il chiamante a convertire un importo che arriva già come
+   * stringa dal database.
+   */
+  amount: Decimal | DecimalString | number;
   days: number;
 }

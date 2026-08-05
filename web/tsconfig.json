@@ -1,0 +1,21 @@
+{
+  "//": "Type-check della SPA. Non emette: la build la fa Vite (esbuild), tsc serve solo a dire se i tipi tornano - ed e' un gate della CI.",
+  "compilerOptions": {
+    "target": "ES2022",
+    // ES2023 per i tipi di Intl: format() accetta una STRINGA numerica, ed e'
+    // esattamente cosi' che questa app formatta il denaro senza passare da un float.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

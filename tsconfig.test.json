@@ -1,0 +1,11 @@
+{
+  "//": "Type-check dei test. Separato da tsconfig.json perché quello EMETTE in build/ con rootDir: src — i test non fanno parte dell'artefatto di produzione e non devono finire nell'immagine. Qui si eredita tutto e si spegne l'emissione.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // Le fixture dei provider sono JSON importati dai test dei normalizzatori.
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test"]
+}

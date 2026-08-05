@@ -11,8 +11,17 @@ export interface InstrumentFilter {
   priceSource?: string;
 }
 
-/** Uno strumento in scrittura: come il modello, senza gli id e i timestamp. */
-export type InstrumentInput = Omit<Instrument, "id" | "createdAt" | "updatedAt">;
+/**
+ * Uno strumento in scrittura: come il modello, senza gli id e i timestamp.
+ *
+ * Obbligatori solo i tre campi che lo SCHEMA dichiara NOT NULL senza default
+ * (`asset_class`, `name`, `currency`, vedi 001_init.sql). Tutto il resto è
+ * opzionale perché `create()` salta i campi `undefined` e lascia decidere al
+ * database — pretendere l'oggetto completo era una promessa che né lo schema né
+ * l'implementazione hanno mai chiesto.
+ */
+export type InstrumentInput = Pick<Instrument, "assetClass" | "name" | "currency"> &
+  Partial<Omit<Instrument, "id" | "createdAt" | "updatedAt" | "assetClass" | "name" | "currency">>;
 
 const COLS = `id, asset_class, name, ticker, isin, exchange, currency, price_source,
   quote_convention, face_value, coupon_rate, coupon_frequency, first_coupon_date,
