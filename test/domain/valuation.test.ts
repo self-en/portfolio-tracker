@@ -1,11 +1,14 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const val = require("../../src/domain/valuation");
-const pos = require("../../src/domain/positions");
-const cal = require("../../src/domain/calendar");
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as val from "../../src/domain/valuation";
+import * as pos from "../../src/domain/positions";
+import * as cal from "../../src/domain/calendar";
+import { must } from "../helpers/must";
+import type { TxSpec } from "../helpers/txSpec";
+import type Decimal from "decimal.js";
 
 let seq = 0;
-function tx(o) {
+function tx(o: TxSpec) {
   return {
     id: o.id ?? ++seq,
     instrument_id: "instrument_id" in o ? o.instrument_id : 1,
@@ -23,7 +26,22 @@ function tx(o) {
     split_ratio: o.split_ratio ?? null,
   };
 }
-const num = (x) => (x === null ? null : Number(x.toFixed()));
+/**
+ * Il valore decimale come number. null resta null: distinguere "non valorizzabile"
+ * da zero è metà del punto di questi test.
+ *
+ * Il parametro è `any` per una ragione precisa, non per pigrizia: `valuePositions`
+ * costruisce le righe come `Array<Record<string, any>>` (valuation.ts:216) e i
+ * totali ne ereditano il tipo, quindi anche `totals.marketValue` risulta un
+ * `Record<string, any>` invece del Decimal che è a runtime. Stringere qui non
+ * aggiungerebbe sicurezza, la sposterebbe soltanto: la correzione vera è tipizzare
+ * le righe in valuation.ts, che è un cambio di produzione a sé.
+ */
+const num = (x: any): number | null =>
+  x === null || x === undefined ? null : Number(x.toFixed());
+
+/** Come `num`, dove un null significherebbe che il test è già fallito. */
+const numOf = (x: any, what = "il valore") => must(num(x), what);
 
 const EQUITY = { id: 1, name: "Acme", assetClass: "EQUITY", currency: "EUR", quoteConvention: "PRICE" };
 
@@ -219,17 +237,17 @@ test("serie obbligazionaria: valore dal nominale, rateo opzionale", () => {
   // Corso SECCO: 10.000 nominali × 0,99 = 9.900.
   const secco = val.valueSeries(common);
   assert.equal(num(secco.points[0].value), 9900);
-  assert.equal(num(secco.points[0].accrued) > 0, true, "il rateo è calcolato a parte");
+  assert.equal(numOf(secco.points[0].accrued, "il rateo") > 0, true, "il rateo è calcolato a parte");
 
   // Con includeAccrued il rateo entra nel totale (corso tel quel).
   const telQuel = val.valueSeries({ ...common, includeAccrued: true });
   assert.ok(
-    num(telQuel.points[0].value) > num(secco.points[0].value),
+    numOf(telQuel.points[0].value, "il tel quel") > numOf(secco.points[0].value, "il secco"),
     "tel quel deve essere superiore al secco"
   );
   // Rateo atteso: 1,725 × 91/181 per 100 di nominale, su 10.000 nominali.
   const expectedAccrued = 10000 * ((1.725 * 91) / 181) / 100;
-  assert.ok(Math.abs(num(secco.points[0].accrued) - expectedAccrued) < 0.01);
+  assert.ok(Math.abs(numOf(secco.points[0].accrued, "il rateo") - expectedAccrued) < 0.01);
 });
 
 test("serie vuota se non ci sono date", () => {
@@ -267,9 +285,9 @@ test("valuePositions calcola totali, pesi e variazione giornaliera", () => {
   assert.equal(num(r.totals.unrealizedPnl), 150);
   assert.equal(num(r.totals.dayChange), 20); // (120-118)×10 + 0
   const a = r.rows.find((x) => x.instrumentId === 1);
-  assert.ok(Math.abs(num(a.weight) - 1200 / 1650) < 1e-9);
+  assert.ok(Math.abs(numOf(a?.weight, "il peso della riga 1") - 1200 / 1650) < 1e-9);
   // I pesi sommano a 1.
-  assert.ok(Math.abs(r.rows.reduce((s, x) => s + num(x.weight), 0) - 1) < 1e-9);
+  assert.ok(Math.abs(r.rows.reduce((s, x) => s + numOf(x.weight, "il peso"), 0) - 1) < 1e-9);
 });
 
 test("valuePositions: realizzato, redditi e latente restano TRE VOCI SEPARATE", () => {
@@ -295,8 +313,13 @@ test("valuePositions: realizzato, redditi e latente restano TRE VOCI SEPARATE", 
   assert.equal(num(r.totals.incomeNet), 59.2);
   assert.equal(num(r.totals.marketValue), 1400); // 10 × 140
   assert.equal(num(r.totals.unrealizedPnl), 400); // 1400 - 1000
-  // Nessun campo "profitto totale": è deliberato.
-  assert.equal(r.totals.totalProfit, undefined);
+  // Nessun campo "profitto totale": è deliberato (docs/decisions.md §3 — realizzato,
+  // redditi e latente restano TRE voci e non si sommano mai in una).
+  // Si asserisce sulle CHIAVI, non su `r.totals.totalProfit`: quell'accesso ora non
+  // compila nemmeno, ed è una buona notizia — vuol dire che il tipo stesso vieta il
+  // campo. Il controllo a runtime resta perché il tipo non intercetta un campo
+  // aggiunto dinamicamente.
+  assert.ok(!Object.keys(r.totals).includes("totalProfit"));
 });
 
 test("valuePositions senza quotazione: warning e valore null, non zero", () => {
@@ -375,13 +398,14 @@ test("valuePositions: il rateo obbligazionario entra nei totali solo con include
   const telQuel = val.valuePositions({ ...args, includeAccrued: true });
 
   // Il rateo è SEMPRE calcolato e riportato a parte…
-  assert.ok(num(secco.totals.accruedInterest) > 0);
+  assert.ok(numOf(secco.totals.accruedInterest, "il rateo totale") > 0);
   assert.equal(num(secco.rows[0].accruedInterest), num(secco.totals.accruedInterest));
   // …ma entra nel totale solo su richiesta (corso tel quel invece che secco).
   assert.equal(num(secco.totals.totalValue), num(secco.totals.marketValue));
   assert.equal(
     num(telQuel.totals.totalValue),
-    num(telQuel.totals.marketValue) + num(telQuel.totals.accruedInterest)
+    numOf(telQuel.totals.marketValue, "il valore di mercato") +
+      numOf(telQuel.totals.accruedInterest, "il rateo totale")
   );
 });
 
@@ -411,8 +435,8 @@ test("allocate raggruppa e pesa, ordinando per valore decrescente", () => {
   assert.equal(byClass[0].key, "ETF");
   assert.equal(num(byClass[0].marketValue), 1500);
   assert.equal(num(byClass[1].marketValue), 300);
-  assert.ok(Math.abs(num(byClass[0].weight) - 1500 / 1800) < 1e-9);
-  assert.ok(Math.abs(byClass.reduce((s, g) => s + num(g.weight), 0) - 1) < 1e-9);
+  assert.ok(Math.abs(numOf(byClass[0].weight, "il peso ETF") - 1500 / 1800) < 1e-9);
+  assert.ok(Math.abs(byClass.reduce((s, g) => s + numOf(g.weight, "il peso"), 0) - 1) < 1e-9);
 });
 
 test("allocate con totale zero non produce NaN", () => {

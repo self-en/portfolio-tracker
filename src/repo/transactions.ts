@@ -19,8 +19,25 @@ export interface LedgerFilter {
   asOf?: DateString;
 }
 
-/** Una transazione in scrittura: come il modello, senza id e timestamp. */
-export type TransactionInput = Omit<Transaction, "id" | "createdAt" | "updatedAt">;
+/**
+ * Una transazione in scrittura: come il modello, senza id e timestamp.
+ *
+ * Obbligatori solo i campi che lo SCHEMA dichiara NOT NULL senza default
+ * (`portfolio_id`, `type`, `trade_date`, `net_amount`, `trade_ccy`, vedi
+ * 001_init.sql); `fees`/`taxes`/`accrued_interest` sono NOT NULL ma con DEFAULT 0,
+ * quindi ometterli è legittimo. Il resto è opzionale perché `create()` salta i
+ * campi `undefined`.
+ */
+export type TransactionInput = Pick<
+  Transaction,
+  "portfolioId" | "type" | "tradeDate" | "netAmount" | "tradeCcy"
+> &
+  Partial<
+    Omit<
+      Transaction,
+      "id" | "createdAt" | "updatedAt" | "portfolioId" | "type" | "tradeDate" | "netAmount" | "tradeCcy"
+    >
+  >;
 
 const COLS = `id, portfolio_id, instrument_id, type, trade_date, settle_date, quantity,
   price, gross_amount, fees, taxes, accrued_interest, net_amount, trade_ccy, fx_rate,

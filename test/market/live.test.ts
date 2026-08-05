@@ -4,18 +4,19 @@
 // condiviso: un test che fallisce a caso è peggio di un test che non c'è. Servono
 // per (a) rigenerare le fixture quando serve e (b) diagnosticare dall'interno del
 // cluster se Yahoo blocca l'egress condiviso.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = "test";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
+import test from "node:test";
+import assert from "node:assert/strict";
 
 const LIVE = process.env.LIVE === "1";
 const opts = { skip: LIVE ? false : "impostare LIVE=1 per interrogare le API reali" };
 
-const { createYahooProvider } = require("../../src/market/yahooProvider");
-const { createFxProvider } = require("../../src/market/fxProvider");
-const config = require("../../src/config");
+import { createYahooProvider } from "../../src/market/yahooProvider";
+import { createFxProvider } from "../../src/market/fxProvider";
+// L'oggetto config, non il namespace del modulo: è l'export DEFAULT.
+import config from "../../src/config";
 
 test("live: quote reale di EUNL.DE", opts, async () => {
   const p = createYahooProvider(config);

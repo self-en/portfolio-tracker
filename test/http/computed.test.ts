@@ -4,53 +4,67 @@
 // Gira contro l'app REALE (fastify + repo + domain) con pg-mem come database, così
 // copre l'orchestrazione — che è dove i pezzi corretti si combinano in modo
 // sbagliato.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import { TEST_PASSWORD } from "../helpers/env";
 
-process.env.APP_PASSWORD = "test-pw";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
-process.env.PGHOST = "memdb";
-process.env.SCHEDULER_ENABLED = "false";
+import test from "node:test";
+import assert from "node:assert/strict";
 
-const { freshMemDb } = require("../helpers/memdb");
+import { freshMemDb } from "../helpers/memdb";
+import type { FastifyInstance } from "fastify";
 
-let server;
-let base;
-let cookie;
+let server: FastifyInstance;
+let base: string;
+let cookie: string;
 
 async function startApp() {
   await freshMemDb();
 
-  const boot = require("../../src/boot");
+  // require e non import: boot e app leggono la config al load e vanno caricati
+  // DOPO che freshMemDb ha installato il pool di pg-mem. `typeof import(...)`
+  // recupera i tipi che un require nudo perderebbe.
+  const boot = require("../../src/boot") as typeof import("../../src/boot");
   boot.state.ready = true;
   boot.state.db.connected = true;
 
-  const { buildApp } = require("../../src/app");
+  const { buildApp } = require("../../src/app") as typeof import("../../src/app");
   server = await buildApp();
   base = await server.listen({ port: 0, host: "127.0.0.1" });
 
   const res = await fetch(`${base}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ password: "test-pw" }),
+    body: JSON.stringify({ password: TEST_PASSWORD }),
   });
   assert.equal(res.status, 204);
   cookie = res.headers.getSetCookie()[0].split(";")[0];
 }
 
-async function api(path, opts = {}) {
+/**
+ * Una chiamata all'API, con il cookie di sessione già attaccato.
+ *
+ * `T` è la forma attesa della risposta e vale `any` per default: questi sono test
+ * GOLDEN-FILE, il corpo È il soggetto delle asserzioni, e il server non esporta i
+ * tipi delle risposte (le route costruiscono oggetti inline). Dichiararne qui una
+ * copia sarebbe una terza verità da tenere allineata a mano, mentre le asserzioni
+ * che seguono già verificano campo per campo. Chi vuole precisione passa `T`.
+ */
+async function api<T = any>(
+  path: string,
+  opts: RequestInit = {}
+): Promise<{ status: number; body: T }> {
   const res = await fetch(`${base}${path}`, {
     ...opts,
     headers: { "content-type": "application/json", cookie, ...(opts.headers || {}) },
   });
   const text = await res.text();
-  let body = null;
+  let body: unknown = null;
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
     body = text;
   }
-  return { status: res.status, body };
+  return { status: res.status, body: body as T };
 }
 
 // --- Il ledger fixture ---------------------------------------------------------
@@ -89,18 +103,24 @@ const BTP = {
   dayCount: "ACT/ACT-ICMA",
 };
 
-const ids = {};
+/** Gli id assegnati dal server agli strumenti del ledger fixture. */
+const ids: Record<string, number> = {};
 
 test("setup: avvio app, creazione strumenti e ledger", async () => {
   await startApp();
 
-  for (const [key, inst] of [["etf", ETF], ["usd", USD_STOCK], ["btp", BTP]]) {
+  const daCreare: Array<[string, object]> = [
+    ["etf", ETF],
+    ["usd", USD_STOCK],
+    ["btp", BTP],
+  ];
+  for (const [key, inst] of daCreare) {
     const r = await api("/api/instruments", { method: "POST", body: JSON.stringify(inst) });
     assert.equal(r.status, 201, `creazione ${key}: ${JSON.stringify(r.body)}`);
     ids[key] = r.body.id;
   }
 
-  const tx = (o) => api("/api/transactions", { method: "POST", body: JSON.stringify(o) });
+  const tx = (o: object) => api("/api/transactions", { method: "POST", body: JSON.stringify(o) });
 
   // ETF: 100 @ 80 con 5 di commissioni → carico 8005
   let r = await tx({ instrumentId: ids.etf, type: "BUY", tradeDate: "2025-01-15", quantity: "100", price: "80", fees: "5" });
@@ -133,11 +153,12 @@ test("setup: avvio app, creazione strumenti e ledger", async () => {
   assert.equal(r.status, 201, JSON.stringify(r.body));
 
   // Prezzi: chiusure per l'ETF e AAPL, prezzo manuale per il BTP.
-  for (const [id, rows] of [
+  const chiusure: Array<[number, Array<[string, string]>]> = [
     [ids.etf, [["2025-01-15", "80"], ["2026-02-10", "120"], ["2026-08-04", "125"]]],
     // Serie AAPL già AGGIUSTATA per lo split (come la restituisce Yahoo).
     [ids.usd, [["2025-03-01", "37.5"], ["2026-08-04", "50"]]],
-  ]) {
+  ];
+  for (const [id, rows] of chiusure) {
     for (const [date, close] of rows) {
       const rr = await api(`/api/instruments/${id}/prices`, {
         method: "PUT",
@@ -153,7 +174,7 @@ test("setup: avvio app, creazione strumenti e ledger", async () => {
   assert.equal(rb.status, 200);
 
   // Cambio EURUSD.
-  const { upsertRates } = require("../../src/repo/fx");
+  const { upsertRates } = require("../../src/repo/fx") as typeof import("../../src/repo/fx");
   await upsertRates([
     { date: "2025-03-01", quote: "USD", rate: "1.25" },
     { date: "2026-08-04", quote: "USD", rate: "1.25" },
@@ -163,7 +184,7 @@ test("setup: avvio app, creazione strumenti e ledger", async () => {
 test("GET /api/portfolio/positions: carico, latente e redditi per strumento", async () => {
   const r = await api("/api/portfolio/positions?asOf=2026-08-04");
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  const byName = new Map(r.body.items.map((x) => [x.instrument.name, x]));
+  const byName = new Map<string, any>(r.body.items.map((x: any) => [x.instrument.name, x]));
 
   // --- ETF: 150 comprate, 30 vendute → 120 residue.
   // Carico dopo i due acquisti = 8005 + 5005 = 13010 su 150 → medio 86,733333
@@ -234,10 +255,10 @@ test("GET /api/portfolio/summary: i totali tornano, e le tre voci restano separa
   assert.ok(b.disclaimer.includes("Non è consulenza fiscale"));
 
   // I pesi per asset class sommano a 1.
-  const sum = b.byAssetClass.reduce((a, g) => a + Number(g.weight), 0);
+  const sum = b.byAssetClass.reduce((a: any, g: any) => a + Number(g.weight), 0);
   assert.ok(Math.abs(sum - 1) < 1e-4, `pesi = ${sum}`);
   assert.deepEqual(
-    b.byAssetClass.map((g) => g.assetClass).sort(),
+    b.byAssetClass.map((g: any) => g.assetClass).sort(),
     ["BOND", "EQUITY", "ETF"]
   );
 
@@ -261,7 +282,7 @@ test("GET /api/portfolio/value-series: nessun salto sullo split, punti coerenti"
   // NESSUN SALTO attorno allo split del 2025-09-01: la serie close di AAPL è già
   // aggiustata e la quantità viene riportata in quote odierne, quindi il valore è
   // continuo. Un doppio conteggio si vedrebbe come un quadruplicarsi improvviso.
-  const i = pts.findIndex((p) => p.date === "2025-09-01");
+  const i = pts.findIndex((p: any) => p.date === "2025-09-01");
   const before = Number(pts[i - 1].value);
   const after = Number(pts[i].value);
   assert.ok(
@@ -273,15 +294,15 @@ test("GET /api/portfolio/value-series: nessun salto sullo split, punti coerenti"
   // arriva un dividendo (il 2025-11-15 c'è uno stacco): incassare un dividendo non
   // riduce quanto hai investito. È la distinzione tra flussi di capitale e flussi di
   // reddito: gli stessi flussi contano per il TWR, ma non per questa linea.
-  const preSale = pts.filter((p) => p.date < "2026-02-10");
+  const preSale = pts.filter((p: any) => p.date < "2026-02-10");
   for (let k = 1; k < preSale.length; k++) {
     assert.ok(
       Number(preSale[k].netInvested) >= Number(preSale[k - 1].netInvested) - 1e-6,
       `investito netto in calo al ${preSale[k].date}`
     );
   }
-  const divDay = pts.find((p) => p.date === "2025-11-15");
-  const dayBefore = pts.find((p) => p.date === "2025-11-14");
+  const divDay = pts.find((p: any) => p.date === "2025-11-15");
+  const dayBefore = pts.find((p: any) => p.date === "2025-11-14");
   assert.equal(
     divDay.netInvested,
     dayBefore.netInvested,
@@ -298,10 +319,10 @@ test("value-series: i punti prima del primo prezzo sono `partial`, non zero sile
   // Il BTP ha un solo prezzo manuale, al 2026-08-04: tutti i giorni precedenti dal
   // suo acquisto non hanno prezzo. Devono essere marcati, non silenziosamente a zero.
   const r = await api("/api/portfolio/value-series?range=ALL&granularity=day&asOf=2026-08-04");
-  const partials = r.body.points.filter((p) => p.partial);
+  const partials = r.body.points.filter((p: any) => p.partial);
   assert.ok(partials.length > 0, "devono esserci punti parziali");
   assert.ok(
-    r.body.meta.warnings.some((w) => w.code === "price_missing"),
+    r.body.meta.warnings.some((w: any) => w.code === "price_missing"),
     "e un warning che spiega quale strumento manca"
   );
   assert.equal(r.body.meta.partialPoints, partials.length);
@@ -314,7 +335,7 @@ test("GET /api/portfolio/allocation: per asset class, valuta e strumento", async
     const r = await api(`/api/portfolio/allocation?by=${by}&asOf=2026-08-04`);
     assert.equal(r.status, 200);
     assert.equal(r.body.by, by);
-    const sum = r.body.items.reduce((a, g) => a + Number(g.weight), 0);
+    const sum = r.body.items.reduce((a: any, g: any) => a + Number(g.weight), 0);
     assert.ok(Math.abs(sum - 1) < 1e-4, `${by}: pesi = ${sum}`);
     // Ordine decrescente per valore.
     for (let i = 1; i < r.body.items.length; i++) {
@@ -326,7 +347,7 @@ test("GET /api/portfolio/allocation: per asset class, valuta e strumento", async
   }
   // Per valuta: EUR (ETF+BTP) e USD (AAPL).
   const cur = await api("/api/portfolio/allocation?by=currency&asOf=2026-08-04");
-  assert.deepEqual(cur.body.items.map((g) => g.key).sort(), ["EUR", "USD"]);
+  assert.deepEqual(cur.body.items.map((g: any) => g.key).sort(), ["EUR", "USD"]);
 });
 
 test("GET /api/portfolio/returns: TWR, XIRR, byYear e flussi", async () => {
@@ -338,10 +359,10 @@ test("GET /api/portfolio/returns: TWR, XIRR, byYear e flussi", async () => {
   assert.ok(Array.isArray(r.body.byYear));
   assert.ok(r.body.byYear.length >= 1);
   // I flussi hanno il segno dell'investitore: gli acquisti sono negativi.
-  const buys = r.body.flows.filter((f) => f.type === "BUY");
+  const buys = r.body.flows.filter((f: any) => f.type === "BUY");
   assert.ok(buys.length >= 4);
   for (const f of buys) assert.ok(Number(f.amount) < 0, "un acquisto è un'uscita di cassa");
-  const divs = r.body.flows.filter((f) => f.type === "DIVIDEND");
+  const divs = r.body.flows.filter((f: any) => f.type === "DIVIDEND");
   assert.ok(Number(divs[0].amount) > 0, "un dividendo è un'entrata");
   // Le due metriche sono spiegate nella risposta: sono facili da confondere.
   assert.ok(r.body.notes.xirr.includes("MWR"));
@@ -366,14 +387,14 @@ test("GET /api/calendar: le cedole del BTP esistono SENZA copertura provider", a
   const r = await api("/api/calendar?from=2026-01-01&to=2027-12-31");
   assert.equal(r.status, 200, JSON.stringify(r.body));
 
-  const coupons = r.body.events.filter((e) => e.kind === "COUPON");
+  const coupons = r.body.events.filter((e: any) => e.kind === "COUPON");
   assert.ok(coupons.length >= 3, `attese più cedole, trovate ${coupons.length}`);
   assert.deepEqual(
-    coupons.map((c) => c.payDate).slice(0, 4),
+    coupons.map((c: any) => c.payDate).slice(0, 4),
     ["2026-01-01", "2026-07-01", "2027-01-01", "2027-07-01"]
   );
 
-  const c = coupons.find((x) => x.payDate === "2027-01-01");
+  const c = coupons.find((x: any) => x.payDate === "2027-01-01");
   assert.equal(c.confidence, "scheduled", "generata dallo scadenzario, non dal provider");
   assert.equal(c.status, "PROJECTED");
   // Number(): pg-mem restituisce i NUMERIC come number, il contratto stringa è
@@ -387,7 +408,7 @@ test("GET /api/calendar: le cedole del BTP esistono SENZA copertura provider", a
 
   // I totali mensili separano confermato e proiettato (la UI li distingue con la
   // texture, non con una seconda tinta).
-  const m = r.body.monthlyTotals.find((x) => x.month === "2027-01");
+  const m = r.body.monthlyTotals.find((x: any) => x.month === "2027-01");
   assert.equal(Number(m.gross).toFixed(2), "172.50");
   assert.equal(Number(m.projected).toFixed(2), "172.50");
   assert.equal(Number(m.confirmed).toFixed(2), "0.00");
@@ -397,11 +418,11 @@ test("il calendario NON somma i rimborsi ai totali di reddito", async () => {
   // Un rimborso a scadenza è capitale che rientra: sommarlo gonfierebbe il grafico
   // dei redditi di un ordine di grandezza (10.000 contro 172,50).
   const r = await api("/api/calendar?from=2030-01-01&to=2030-12-31");
-  const redemption = r.body.events.find((e) => e.kind === "REDEMPTION");
+  const redemption = r.body.events.find((e: any) => e.kind === "REDEMPTION");
   assert.ok(redemption, "il rimborso deve comparire nel calendario");
   assert.equal(Number(redemption.estimatedGross).toFixed(2), "10000.00");
 
-  const july = r.body.monthlyTotals.find((x) => x.month === "2030-07");
+  const july = r.body.monthlyTotals.find((x: any) => x.month === "2030-07");
   // Solo la cedola, non il rimborso.
   assert.equal(Number(july.gross).toFixed(2), "172.50");
 });
@@ -410,7 +431,7 @@ test("POST /api/calendar/:id/confirm crea la transazione COUPON e collega l'even
   // È l'idea di UX a maggior valore del piano: il calendario diventa il canale
   // primario di data entry.
   const list = await api("/api/calendar?from=2026-01-01&to=2026-12-31");
-  const coupon = list.body.events.find((e) => e.kind === "COUPON" && e.status === "PROJECTED");
+  const coupon = list.body.events.find((e: any) => e.kind === "COUPON" && e.status === "PROJECTED");
   assert.ok(coupon);
 
   // Ritenuta 12,5% sui titoli di Stato: 172,50 × 0,125 = 21,5625
@@ -429,7 +450,7 @@ test("POST /api/calendar/:id/confirm crea la transazione COUPON e collega l'even
 
   // Ora la cedola risulta incassata, con confidence 'paid'.
   const after = await api("/api/calendar?from=2026-01-01&to=2026-12-31");
-  const same = after.body.events.find((e) => e.id === coupon.id);
+  const same = after.body.events.find((e: any) => e.id === coupon.id);
   assert.equal(same.confidence, "paid");
   assert.equal(same.transactionId, r.body.transaction.id);
 
@@ -444,7 +465,7 @@ test("POST /api/calendar/:id/confirm crea la transazione COUPON e collega l'even
 
 test("il reddito confermato compare in /portfolio/income e nel summary", async () => {
   const inc = await api("/api/portfolio/income?groupBy=month");
-  const jan = inc.body.items.find((x) => x.key === "2026-01");
+  const jan = inc.body.items.find((x: any) => x.key === "2026-01");
   assert.ok(jan, "la cedola confermata deve comparire tra i redditi");
   assert.equal(Number(jan.gross).toFixed(2), "172.50");
   assert.equal(Number(jan.taxes).toFixed(4), "21.5625");
@@ -457,7 +478,7 @@ test("il reddito confermato compare in /portfolio/income e nel summary", async (
 
 test("il rimborso a scadenza NON si conferma come reddito: indica la via corretta", async () => {
   const list = await api("/api/calendar?from=2030-01-01&to=2030-12-31");
-  const red = list.body.events.find((e) => e.kind === "REDEMPTION");
+  const red = list.body.events.find((e: any) => e.kind === "REDEMPTION");
   const r = await api(`/api/calendar/${red.id}/confirm`, { method: "POST", body: "{}" });
   assert.equal(r.status, 422);
   assert.match(r.body.error.message, /vendita al 100/);
@@ -486,11 +507,11 @@ test("GET /api/export produce un dump completo e reimportabile", async () => {
   // I prezzi manuali sono SEMPRE inclusi: per le obbligazioni sono l'unico dato
   // che nessun provider può rigenerare.
   assert.ok(r.body.manualPrices.length >= 1);
-  const btpPrices = r.body.manualPrices.find((g) => g.instrumentIsin === "IT0005611741");
+  const btpPrices = r.body.manualPrices.find((g: any) => g.instrumentIsin === "IT0005611741");
   assert.ok(btpPrices, "i prezzi manuali del BTP devono esserci");
   assert.equal(btpPrices.prices[0].date, "2026-08-04");
   // Le cedole proiettate NON sono esportate: sono derivate, si rigenerano.
-  assert.ok(r.body.events.every((e) => e.status !== "PROJECTED" || e.transactionId));
+  assert.ok(r.body.events.every((e: any) => e.status !== "PROJECTED" || e.transactionId));
 });
 
 test("import in modalità replace ricostruisce lo stesso portafoglio", async () => {
@@ -516,7 +537,7 @@ test("import in modalità replace ricostruisce lo stesso portafoglio", async () 
 
   // E le cedole proiettate sono state RIGENERATE, non importate.
   const cal2 = await api("/api/calendar?from=2027-01-01&to=2027-12-31");
-  assert.ok(cal2.body.events.filter((e) => e.kind === "COUPON").length >= 2);
+  assert.ok(cal2.body.events.filter((e: any) => e.kind === "COUPON").length >= 2);
 });
 
 test("teardown", async () => {

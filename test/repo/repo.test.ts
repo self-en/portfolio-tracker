@@ -7,22 +7,25 @@
 // Limiti noti di pg-mem: indici unique parziali, DISTINCT ON, funzioni finestra,
 // advisory lock. Dove inciampa, il test si autoesclude con un messaggio esplicito
 // invece di fallire in modo fuorviante — la verifica vera è sull'env di branch.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = "test";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
-process.env.PGHOST = "localhost"; // fa credere a config.js che il DB sia configurato
+import test from "node:test";
+import assert from "node:assert/strict";
 
-const { freshMemDb, tolerantMem } = require("../helpers/memdb");
+import path from "node:path";
 
-const instrumentsRepo = require("../../src/repo/instruments");
-const txRepo = require("../../src/repo/transactions");
-const portfoliosRepo = require("../../src/repo/portfolios");
-const pricesRepo = require("../../src/repo/prices");
-const fxRepo = require("../../src/repo/fx");
-const eventsRepo = require("../../src/repo/events");
-const refreshLog = require("../../src/repo/refreshLog");
+import { freshMemDb, tolerantMem } from "../helpers/memdb";
+import { must } from "../helpers/must";
+import { readSourcesDeep } from "../helpers/sourceScan";
+
+import * as instrumentsRepo from "../../src/repo/instruments";
+import * as txRepo from "../../src/repo/transactions";
+import * as portfoliosRepo from "../../src/repo/portfolios";
+import * as pricesRepo from "../../src/repo/prices";
+import * as fxRepo from "../../src/repo/fx";
+import * as eventsRepo from "../../src/repo/events";
+import * as refreshLog from "../../src/repo/refreshLog";
 
 const freshDb = freshMemDb;
 const tolerant = tolerantMem;
@@ -56,27 +59,27 @@ test("il portafoglio seminato è leggibile", async () => {
   await freshDb();
   const list = await portfoliosRepo.list();
   assert.equal(list.length, 1);
-  assert.equal(list[0].name, "Principale");
-  assert.equal((await portfoliosRepo.first()).id, list[0].id);
+  assert.equal(must(list[0], "il primo portafoglio").name, "Principale");
+  assert.equal(must(await portfoliosRepo.first(), "il portafoglio").id, must(list[0], "il primo portafoglio").id);
 });
 
 test("strumenti: create → byId round-trip, camelCase e numerici stringa", async () => {
   await freshDb();
-  const created = await instrumentsRepo.create(EQ);
+  const created = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   assert.equal(created.name, "Acme SpA");
   assert.equal(created.ticker, "ACME.MI");
   assert.equal(created.assetClass, "EQUITY");
   assert.equal(created.active, true);
 
-  const read = await instrumentsRepo.byId(created.id);
+  const read = must(await instrumentsRepo.byId(created.id), "lo strumento letto");
   assert.equal(read.isin, "IT0001234567");
   assert.equal(read.currency, "EUR");
 });
 
 test("strumenti: un bond conserva TUTTI i campi obbligazionari", async () => {
   await freshDb();
-  const b = await instrumentsRepo.create(BTP);
-  const read = await instrumentsRepo.byId(b.id);
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
+  const read = must(await instrumentsRepo.byId(b.id), "lo strumento letto");
   assert.equal(read.quoteConvention, "PCT_OF_NOMINAL");
   assert.equal(read.couponFrequency, 2, "SMALLINT → number");
   assert.equal(read.maturityDate, "2030-07-01", "DATE → stringa 'YYYY-MM-DD', non un Date");
@@ -89,7 +92,7 @@ test("strumenti: un bond conserva TUTTI i campi obbligazionari", async () => {
   assert.equal(Number(read.couponRate), 0.0345);
   assert.equal(read.dayCount, "ACT/ACT-ICMA");
   // Lo scadenzario si genera dai campi riletti dal database, non da quelli scritti.
-  const bonds = require("../../src/domain/bonds");
+  const bonds = require("../../src/domain/bonds") as typeof import("../../src/domain/bonds");
   const s = bonds.couponSchedule(read);
   assert.equal(s.length, 12);
   assert.equal(s[0].amountPer100, "1.725");
@@ -97,8 +100,8 @@ test("strumenti: un bond conserva TUTTI i campi obbligazionari", async () => {
 
 test("strumenti: update parziale non azzera gli altri campi", async () => {
   await freshDb();
-  const created = await instrumentsRepo.create(EQ);
-  const updated = await instrumentsRepo.update(created.id, { notes: "una nota" });
+  const created = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const updated = must(await instrumentsRepo.update(created.id, { notes: "una nota" }), "lo strumento aggiornato");
   assert.equal(updated.notes, "una nota");
   assert.equal(updated.name, "Acme SpA", "il nome deve sopravvivere alla PATCH");
   assert.equal(updated.ticker, "ACME.MI");
@@ -123,7 +126,7 @@ test("strumenti: filtri di list", async () => {
 
 test("strumenti: byIsinOrTicker trova per entrambe le chiavi", async () => {
   await freshDb();
-  const c = await instrumentsRepo.create(EQ);
+  const c = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   assert.equal((await instrumentsRepo.byIsinOrTicker({ isin: "IT0001234567" }))?.id, c.id);
   assert.equal((await instrumentsRepo.byIsinOrTicker({ ticker: "ACME.MI" }))?.id, c.id);
   assert.equal(await instrumentsRepo.byIsinOrTicker({ isin: "XX0000000000" }), null);
@@ -132,51 +135,54 @@ test("strumenti: byIsinOrTicker trova per entrambe le chiavi", async () => {
 
 test("strumenti: mapByIds restituisce la Map che domain/ si aspetta", async (t) => {
   await freshDb();
-  const a = await instrumentsRepo.create(EQ);
-  const b = await instrumentsRepo.create(BTP);
+  const a = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
   const map = await instrumentsRepo.mapByIds([a.id, b.id]);
   if (map.size !== 2) {
     t.skip("limite di pg-mem su ANY(int[]) con più chiavi");
     return;
   }
-  assert.equal(map.get(a.id).name, "Acme SpA");
+  assert.equal(must(map.get(a.id), "il gruppo di a.id").name, "Acme SpA");
   assert.equal((await instrumentsRepo.mapByIds([])).size, 0, "lista vuota → nessuna query");
 });
 
 test("transazioni: create → byId, e i numerici restano stringhe", async () => {
   await freshDb();
-  const p = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
-  const created = await txRepo.create({
-    portfolioId: p.id,
-    instrumentId: i.id,
-    type: "BUY",
-    tradeDate: "2026-01-10",
-    quantity: "10",
-    price: "100",
-    grossAmount: "1000",
-    fees: "5",
-    taxes: "0",
-    accruedInterest: "0",
-    netAmount: "-1005",
-    tradeCcy: "EUR",
-    fxRate: "1",
-  });
+  const p = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const created = must(
+    await txRepo.create({
+      portfolioId: p.id,
+      instrumentId: i.id,
+      type: "BUY",
+      tradeDate: "2026-01-10",
+      quantity: "10",
+      price: "100",
+      grossAmount: "1000",
+      fees: "5",
+      taxes: "0",
+      accruedInterest: "0",
+      netAmount: "-1005",
+      tradeCcy: "EUR",
+      fxRate: "1",
+    }),
+    "il movimento creato"
+  );
   assert.equal(created.type, "BUY");
   assert.equal(created.tradeDate, "2026-01-10");
   assert.equal(Number(created.quantity), 10);
   assert.equal(Number(created.netAmount), -1005);
 
-  const read = await txRepo.byId(created.id);
+  const read = must(await txRepo.byId(created.id), "il movimento letto");
   assert.equal(read.id, created.id);
   assert.equal(read.instrumentId, i.id);
 });
 
 test("transazioni: il ledger è ASCENDENTE per (trade_date, id)", async () => {
   const { pool: p } = await freshDb();
-  const pf = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
-  const mk = (date, qty) =>
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const mk = (date: string, qty: string) =>
     txRepo.create({
       portfolioId: pf.id,
       instrumentId: i.id,
@@ -205,9 +211,9 @@ test("transazioni: il ledger è ASCENDENTE per (trade_date, id)", async () => {
 
 test("transazioni: ledgerByInstrument raggruppa ed esclude i movimenti di cassa", async () => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const a = await instrumentsRepo.create(EQ);
-  const b = await instrumentsRepo.create({ ...EQ, name: "Beta", ticker: "BETA.MI", isin: "IT0009999999" });
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const a = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const b = must(await instrumentsRepo.create({ ...EQ, name: "Beta", ticker: "BETA.MI", isin: "IT0009999999" }), "lo strumento creato");
   const base = { portfolioId: pf.id, tradeCcy: "EUR", fees: "0", taxes: "0", accruedInterest: "0" };
   await txRepo.create({ ...base, instrumentId: a.id, type: "BUY", tradeDate: "2026-01-01", quantity: "1", price: "10", netAmount: "-10" });
   await txRepo.create({ ...base, instrumentId: b.id, type: "BUY", tradeDate: "2026-01-02", quantity: "2", price: "20", netAmount: "-40" });
@@ -215,14 +221,14 @@ test("transazioni: ledgerByInstrument raggruppa ed esclude i movimenti di cassa"
 
   const map = await txRepo.ledgerByInstrument({ portfolioId: pf.id });
   assert.equal(map.size, 2, "il DEPOSIT senza strumento non crea un gruppo");
-  assert.equal(map.get(a.id).length, 1);
-  assert.equal(map.get(b.id).length, 1);
+  assert.equal(must(map.get(a.id), "il gruppo di a.id").length, 1);
+  assert.equal(must(map.get(b.id), "il gruppo di b.id").length, 1);
 });
 
 test("transazioni: paginazione keyset stabile e senza duplicati", async (t) => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   for (let k = 1; k <= 10; k++) {
     await txRepo.create({
       portfolioId: pf.id,
@@ -270,8 +276,8 @@ test("transazioni: il cursore è opaco ma robusto a input spazzatura", () => {
 
 test("transazioni: la JOIN con lo strumento porta i metadati per la tabella", async (t) => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const b = await instrumentsRepo.create(BTP);
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
   await txRepo.create({
     portfolioId: pf.id,
     instrumentId: b.id,
@@ -287,16 +293,16 @@ test("transazioni: la JOIN con lo strumento porta i metadati per la tabella", as
   });
   await tolerant(t, async () => {
     const page = await txRepo.list({ portfolioId: pf.id });
-    assert.equal(page.items[0].instrument.name, "BTP 3,45% 01/07/2030");
-    assert.equal(page.items[0].instrument.quoteConvention, "PCT_OF_NOMINAL");
-    assert.equal(page.items[0].instrument.faceValue !== null, true);
+    assert.equal(must(page.items[0]?.instrument, "lo strumento del movimento").name, "BTP 3,45% 01/07/2030");
+    assert.equal(must(page.items[0]?.instrument, "lo strumento del movimento").quoteConvention, "PCT_OF_NOMINAL");
+    assert.equal(must(page.items[0]?.instrument, "lo strumento del movimento").faceValue !== null, true);
   });
 });
 
 test("transazioni: earliestDate per portafoglio e per strumento", async () => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   assert.equal(await txRepo.earliestDate(pf.id), null, "senza movimenti è null");
   const base = { portfolioId: pf.id, instrumentId: i.id, type: "BUY", quantity: "1", price: "10", netAmount: "-10", tradeCcy: "EUR", fees: "0", taxes: "0", accruedInterest: "0" };
   await txRepo.create({ ...base, tradeDate: "2025-06-01" });
@@ -307,22 +313,25 @@ test("transazioni: earliestDate per portafoglio e per strumento", async () => {
 
 test("transazioni: update ricalcola e delete rimuove", async () => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
-  const tx = await txRepo.create({
-    portfolioId: pf.id,
-    instrumentId: i.id,
-    type: "BUY",
-    tradeDate: "2026-01-10",
-    quantity: "10",
-    price: "100",
-    netAmount: "-1000",
-    tradeCcy: "EUR",
-    fees: "0",
-    taxes: "0",
-    accruedInterest: "0",
-  });
-  const upd = await txRepo.update(tx.id, { price: "110", netAmount: "-1100" });
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const tx = must(
+    await txRepo.create({
+      portfolioId: pf.id,
+      instrumentId: i.id,
+      type: "BUY",
+      tradeDate: "2026-01-10",
+      quantity: "10",
+      price: "100",
+      netAmount: "-1000",
+      tradeCcy: "EUR",
+      fees: "0",
+      taxes: "0",
+      accruedInterest: "0",
+    }),
+    "il movimento creato"
+  );
+  const upd = must(await txRepo.update(tx.id, { price: "110", netAmount: "-1100" }), "il movimento aggiornato");
   assert.equal(Number(upd.price), 110);
   assert.equal(Number(upd.netAmount), -1100);
   assert.equal(await txRepo.remove(tx.id), true);
@@ -332,7 +341,7 @@ test("transazioni: update ricalcola e delete rimuove", async () => {
 
 test("prezzi: upsertBars è IDEMPOTENTE", async () => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   const bars = [
     { date: "2026-01-02", close: "100", adjClose: "100", open: "99", high: "101", low: "98", volume: "1000" },
     { date: "2026-01-05", close: "102" },
@@ -356,7 +365,7 @@ test("prezzi: un prezzo MANUALE non viene sovrascritto da uno automatico", async
   // Regola importante per le obbligazioni: il dato inserito a mano è l'unico che
   // esiste, e un refresh non deve poterlo cancellare.
   await freshDb();
-  const b = await instrumentsRepo.create(BTP);
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
   await pricesRepo.upsertManual(b.id, "2026-01-02", "98.5");
   await pricesRepo.upsertBars(b.id, [{ date: "2026-01-02", close: "1" }], "yahoo");
 
@@ -371,8 +380,8 @@ test("prezzi: un prezzo MANUALE non viene sovrascritto da uno automatico", async
 
 test("prezzi: seriesForMany raggruppa per strumento in una sola query", async (t) => {
   await freshDb();
-  const a = await instrumentsRepo.create(EQ);
-  const b = await instrumentsRepo.create({ ...EQ, name: "Beta", ticker: "B.MI", isin: "IT0008888888" });
+  const a = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  const b = must(await instrumentsRepo.create({ ...EQ, name: "Beta", ticker: "B.MI", isin: "IT0008888888" }), "lo strumento creato");
   await pricesRepo.upsertBars(a.id, [{ date: "2026-01-02", close: "10" }]);
   await pricesRepo.upsertBars(b.id, [{ date: "2026-01-02", close: "20" }, { date: "2026-01-03", close: "21" }]);
 
@@ -381,16 +390,16 @@ test("prezzi: seriesForMany raggruppa per strumento in una sola query", async (t
     t.skip("limite di pg-mem su ANY(int[]) con più chiavi");
     return;
   }
-  assert.equal(map.get(a.id).length, 1);
-  assert.equal(map.get(b.id).length, 2);
+  assert.equal(must(map.get(a.id), "il gruppo di a.id").length, 1);
+  assert.equal(must(map.get(b.id), "il gruppo di b.id").length, 2);
   // Ascendente per data: è il contratto che forwardFill assume.
-  assert.deepEqual(map.get(b.id).map((x) => x.date), ["2026-01-02", "2026-01-03"]);
+  assert.deepEqual(must(map.get(b.id), "il gruppo di b.id").map((x: { date: string }) => x.date), ["2026-01-02", "2026-01-03"]);
   assert.equal((await pricesRepo.seriesForMany([])).size, 0);
 });
 
 test("prezzi: latestAsOf fa forward-fill in SQL", async (t) => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   await pricesRepo.upsertBars(i.id, [
     { date: "2026-01-02", close: "100" },
     { date: "2026-01-09", close: "110" },
@@ -412,7 +421,7 @@ test("prezzi: latestAsOf fa forward-fill in SQL", async (t) => {
 
 test("quotes_latest: upsert per strumento, una riga sola", async (t) => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   await pricesRepo.upsertQuote({ instrumentId: i.id, price: "100", currency: "EUR", previousClose: "99", source: "yahoo" });
   await pricesRepo.upsertQuote({ instrumentId: i.id, price: "101", currency: "EUR", previousClose: "100", source: "yahoo" });
   const m = await pricesRepo.latestQuotes([i.id]);
@@ -435,9 +444,9 @@ test("fx: upsertRates idempotente e seriesForMany per valuta", async () => {
   await fxRepo.upsertRates(recs);
 
   const map = await fxRepo.seriesForMany(["USD", "GBP"]);
-  assert.equal(map.get("USD").length, 2, "nessun duplicato");
-  assert.equal(map.get("GBP").length, 1);
-  assert.deepEqual(map.get("USD").map((x) => x.date), ["2026-08-03", "2026-08-04"]);
+  assert.equal(must(map.get("USD"), "la serie USD").length, 2, "nessun duplicato");
+  assert.equal(must(map.get("GBP"), "la serie GBP").length, 1);
+  assert.deepEqual(must(map.get("USD"), "la serie USD").map((x: { date: string }) => x.date), ["2026-08-03", "2026-08-04"]);
 
   // EUR (la base) non viene mai interrogata né persistita.
   const withBase = await fxRepo.seriesForMany(["EUR", "USD"]);
@@ -449,24 +458,24 @@ test("fx: un tasso forward-filled non sovrascrive uno pubblicato", async () => {
   await fxRepo.upsertRates([{ date: "2026-08-04", quote: "USD", rate: "1.1523", isFilled: false }]);
   await fxRepo.upsertRates([{ date: "2026-08-04", quote: "USD", rate: "9.9999", isFilled: true }]);
   const map = await fxRepo.seriesForMany(["USD"]);
-  assert.equal(Number(map.get("USD")[0].rate), 1.1523, "il tasso pubblicato vince sul riempito");
+  assert.equal(Number(must(map.get("USD"), "la serie USD")[0].rate), 1.1523, "il tasso pubblicato vince sul riempito");
 });
 
 test("fx: rateAsOf riporta avanti e dichiara la data effettiva", async () => {
   await freshDb();
   await fxRepo.upsertRates([{ date: "2026-08-03", quote: "USD", rate: "1.15" }]);
-  const r = await fxRepo.rateAsOf("USD", "2026-08-10");
+  const r = must(await fxRepo.rateAsOf("USD", "2026-08-10"), "il cambio");
   assert.equal(Number(r.rate), 1.15);
   assert.equal(r.date, "2026-08-03", "dice DA QUANDO viene il tasso");
   // EUR su EUR è sempre 1 e non tocca il database.
-  assert.equal((await fxRepo.rateAsOf("EUR", "2026-08-10")).rate, "1");
+  assert.equal(must(await fxRepo.rateAsOf("EUR", "2026-08-10"), "il cambio EUR/EUR").rate, "1");
   // Nessun tasso disponibile → null, non 1 silenzioso.
   assert.equal(await fxRepo.rateAsOf("JPY", "2026-08-10"), null);
 });
 
 test("eventi: upsert sulla chiave naturale è idempotente", async () => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   const ev = {
     instrumentId: i.id,
     kind: "DIVIDEND",
@@ -486,7 +495,7 @@ test("eventi: upsert sulla chiave naturale è idempotente", async () => {
 
 test("eventi: un evento PAID non viene declassato da un refresh", async () => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   const ev = {
     instrumentId: i.id,
     kind: "DIVIDEND",
@@ -497,7 +506,7 @@ test("eventi: un evento PAID non viene declassato da un refresh", async () => {
     currency: "EUR",
     source: "yahoo",
   };
-  const created = await eventsRepo.upsert(ev);
+  const created = must(await eventsRepo.upsert(ev), "l'evento salvato");
   await eventsRepo.markPaid(created.id, null);
   // Il refresh ripassa con status PROJECTED.
   await eventsRepo.upsert({ ...ev, status: "PROJECTED" });
@@ -507,8 +516,8 @@ test("eventi: un evento PAID non viene declassato da un refresh", async () => {
 
 test("eventi: replaceProjected rigenera ma RISPARMIA gli eventi collegati", async () => {
   await freshDb();
-  const b = await instrumentsRepo.create(BTP);
-  const bonds = require("../../src/domain/bonds");
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
+  const bonds = require("../../src/domain/bonds") as typeof import("../../src/domain/bonds");
   const mk = () =>
     bonds.projectedEvents(b, null).map((e) => ({
       kind: e.kind,
@@ -526,20 +535,23 @@ test("eventi: replaceProjected rigenera ma RISPARMIA gli eventi collegati", asyn
   assert.equal((await eventsRepo.list({ instrumentId: b.id })).length, 13);
 
   // Un evento confermato non deve sparire alla rigenerazione.
-  const first = (await eventsRepo.list({ instrumentId: b.id }))[0];
-  const pf = await portfoliosRepo.first();
-  const tx = await txRepo.create({
-    portfolioId: pf.id,
-    instrumentId: b.id,
-    type: "COUPON",
-    tradeDate: first.payDate,
-    grossAmount: "172.5",
-    netAmount: "127.65",
-    taxes: "44.85",
-    fees: "0",
-    accruedInterest: "0",
-    tradeCcy: "EUR",
-  });
+  const first = must((await eventsRepo.list({ instrumentId: b.id }))[0], "il primo evento");
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const tx = must(
+    await txRepo.create({
+      portfolioId: pf.id,
+      instrumentId: b.id,
+      type: "COUPON",
+      tradeDate: must(first.payDate, "la data di pagamento"),
+      grossAmount: "172.5",
+      netAmount: "127.65",
+      taxes: "44.85",
+      fees: "0",
+      accruedInterest: "0",
+      tradeCcy: "EUR",
+    }),
+    "il movimento creato"
+  );
   await eventsRepo.markPaid(first.id, tx.id);
   await eventsRepo.replaceProjected(b.id, mk());
   const after = await eventsRepo.list({ instrumentId: b.id });
@@ -551,8 +563,8 @@ test("eventi: replaceProjected rigenera ma RISPARMIA gli eventi collegati", asyn
 
 test("eventi: filtro per intervallo di pay_date, ordinato", async () => {
   await freshDb();
-  const b = await instrumentsRepo.create(BTP);
-  const bonds = require("../../src/domain/bonds");
+  const b = must(await instrumentsRepo.create(BTP), "lo strumento creato");
+  const bonds = require("../../src/domain/bonds") as typeof import("../../src/domain/bonds");
   await eventsRepo.replaceProjected(
     b.id,
     bonds.projectedEvents(b, null).map((e) => ({
@@ -574,7 +586,7 @@ test("refresh_log: start → finish e lastSuccess", async (t) => {
   const id = await refreshLog.start("quotes", "tutti");
   await refreshLog.finish(id, { ok: true, rowCount: 7 });
   await tolerant(t, async () => {
-    const last = await refreshLog.lastSuccess("quotes");
+    const last = must(await refreshLog.lastSuccess("quotes"), "l'ultimo successo");
     assert.equal(Number(last.rowCount), 7);
     assert.equal(await refreshLog.lastSuccess("fx"), null);
     const runs = await refreshLog.lastRuns();
@@ -593,8 +605,8 @@ test("refresh_log: un errore viene troncato, non fa esplodere l'INSERT", async (
 
 test("strumenti: transactionCount alimenta il 409 su DELETE", async () => {
   await freshDb();
-  const pf = await portfoliosRepo.first();
-  const i = await instrumentsRepo.create(EQ);
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   assert.equal(await instrumentsRepo.transactionCount(i.id), 0);
   await txRepo.create({
     portfolioId: pf.id,
@@ -614,7 +626,7 @@ test("strumenti: transactionCount alimenta il 409 su DELETE", async () => {
 
 test("strumenti: priceCoverage riporta il range effettivo", async () => {
   await freshDb();
-  const i = await instrumentsRepo.create(EQ);
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
   assert.deepEqual(await instrumentsRepo.priceCoverage(i.id), { from: null, to: null, rows: 0 });
   await pricesRepo.upsertBars(i.id, [
     { date: "2026-01-02", close: "100" },
@@ -637,28 +649,12 @@ test("strumenti: refreshable esclude i manuali e quelli senza ticker", async () 
 });
 
 test("il layer repo è l'UNICO posto con SQL (confine architetturale)", () => {
-  const fs = require("node:fs");
-  const path = require("node:path");
   const root = path.join(__dirname, "..", "..", "src");
   const SQL = /\b(SELECT|INSERT INTO|UPDATE\s+\w+\s+SET|DELETE FROM)\b/;
   const consentiti = ["repo", "db"];
 
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".js")) continue;
-      const rel = path.relative(root, full);
-      if (consentiti.some((c) => rel.startsWith(c + path.sep))) continue;
-      const src = fs
-        .readFileSync(full, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-      assert.ok(!SQL.test(src), `${rel} contiene SQL: deve stare in src/repo/`);
-    }
-  };
-  walk(root);
+  for (const { rel, src } of readSourcesDeep(root)) {
+    if (consentiti.some((c) => rel.startsWith(c + path.sep))) continue;
+    assert.ok(!SQL.test(src), `${rel} contiene SQL: deve stare in src/repo/`);
+  }
 });

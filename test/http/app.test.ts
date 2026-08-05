@@ -4,25 +4,29 @@
 // trappole qui sotto sono tutte silenziose: nessuna produce un errore lato server,
 // tutte rompono l'app nel browser. Sono state trovate a mano con curl; questi test
 // impediscono che tornino.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import { TEST_PASSWORD } from "../helpers/env";
 
-process.env.APP_PASSWORD = "test-pw";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
-process.env.PGHOST = "memdb";
-process.env.SCHEDULER_ENABLED = "false";
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import fs from "node:fs";
 
-const { freshMemDb } = require("../helpers/memdb");
+import { freshMemDb } from "../helpers/memdb";
+import type { FastifyInstance } from "fastify";
 
-let server;
-let base;
+let server: FastifyInstance;
+let base: string;
 
 test("setup", async () => {
   await freshMemDb();
-  const boot = require("../../src/boot");
+  // require e non import: boot e app leggono la config al load, e vanno caricati
+  // DOPO che freshMemDb ha installato il pool di pg-mem. `typeof import(...)`
+  // recupera i tipi che un require nudo perderebbe.
+  const boot = require("../../src/boot") as typeof import("../../src/boot");
   boot.state.ready = true;
   boot.state.db.connected = true;
-  const { buildApp } = require("../../src/app");
+  const { buildApp } = require("../../src/app") as typeof import("../../src/app");
   server = await buildApp();
   base = await server.listen({ port: 0, host: "127.0.0.1" });
 });
@@ -56,7 +60,7 @@ test("il cookie di sessione NON ha Secure per default, ma ha HttpOnly e SameSite
   const res = await fetch(`${base}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ password: "test-pw" }),
+    body: JSON.stringify({ password: TEST_PASSWORD }),
   });
   assert.equal(res.status, 204);
   const cookie = res.headers.getSetCookie()[0];
@@ -120,11 +124,9 @@ test("index.html è no-store, gli asset hashati sono immutable", async () => {
   const index = await fetch(`${base}/`);
   assert.match(index.headers.get("cache-control") || "", /no-store/);
 
-  const fs = require("node:fs");
-  const path = require("node:path");
   const assetsDir = path.join(__dirname, "..", "..", "web", "dist", "assets");
   if (!fs.existsSync(assetsDir)) return; // build assente: niente da verificare
-  const asset = fs.readdirSync(assetsDir).find((f) => f.endsWith(".js"));
+  const asset = fs.readdirSync(assetsDir).find((f: string) => f.endsWith(".js"));
   if (!asset) return;
   const res = await fetch(`${base}/assets/${asset}`);
   assert.equal(res.status, 200);
@@ -170,8 +172,8 @@ test("il rate limit sul login scatta e restituisce Retry-After", async () => {
   const limited = attempts.find((r) => r.status === 429);
   assert.ok(limited, "dopo 10 tentativi deve arrivare un 429");
   assert.ok(limited.headers.get("retry-after"), "il 429 deve portare Retry-After");
-  const body = await limited.json();
-  assert.equal(body.error.code, "rate_limited");
+  const body = (await limited.json()) as { error?: { code?: string } };
+  assert.equal(body.error?.code, "rate_limited");
 });
 
 test("teardown", async () => {

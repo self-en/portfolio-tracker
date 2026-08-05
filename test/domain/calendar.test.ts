@@ -1,6 +1,6 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const cal = require("../../src/domain/calendar");
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as cal from "../../src/domain/calendar";
 
 test("addDays attraversa i confini di mese e anno", () => {
   assert.equal(cal.addDays("2026-01-31", 1), "2026-02-01");
@@ -199,6 +199,8 @@ test("resolveRange non parte prima della prima transazione", () => {
 
 test("le date malformate lanciano invece di produrre risultati silenziosamente sbagliati", () => {
   assert.throws(() => cal.addDays("04/08/2026", 1), TypeError);
-  assert.throws(() => cal.toMs(undefined), TypeError);
+  // Il cast è il punto: le date arrivano anche da JSON e dal database, dove il
+  // tipo non è una garanzia. Deve lanciare, non restituire NaN.
+  assert.throws(() => cal.toMs(undefined as unknown as string), TypeError);
   assert.throws(() => cal.daysBetween("2026-1-1", "2026-01-02"), TypeError);
 });

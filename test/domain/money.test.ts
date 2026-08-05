@@ -1,6 +1,9 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const m = require("../../src/domain/money");
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import * as m from "../../src/domain/money";
+import { importsOf, readSources, runtimeImportsOf } from "../helpers/sourceScan";
+import { must } from "../helpers/must";
 
 test("0,1 + 0,2 fa ESATTAMENTE 0,3 (il motivo per cui esiste questo modulo)", () => {
   // In float 0.1 + 0.2 === 0.30000000000000004.
@@ -102,7 +105,7 @@ test("share e safeDiv non producono NaN né Infinity", () => {
   assert.equal(m.share("25", "100").toFixed(), "0.25");
   assert.equal(m.share("25", "0").toFixed(), "0", "totale zero → peso zero, non NaN");
   assert.equal(m.safeDiv("10", "0"), null);
-  assert.equal(m.safeDiv("10", "4").toFixed(), "2.5");
+  assert.equal(must(m.safeDiv("10", "4"), "10/4").toFixed(), "2.5");
 });
 
 test("sum somma una lista mista", () => {
@@ -132,28 +135,26 @@ test("DP dichiara le scale usate dallo schema", () => {
 
 test("domain/ importa SOLO decimal.js (confine architetturale)", () => {
   // Il confine che rende testabile la matematica senza database: se qualcuno
-  // aggiunge un require di pg o del logger dentro domain/, questo test lo blocca.
-  const fs = require("node:fs");
-  const path = require("node:path");
+  // aggiunge un import di pg o del logger dentro domain/, questo test lo blocca.
   const dir = path.join(__dirname, "..", "..", "src", "domain");
   const vietati = ["pg", "../logger", "../db/", "../market/", "../http/", "express", "node-cron"];
 
-  // I commenti vanno rimossi prima di analizzare: questi file PARLANO delle regole
-  // che rispettano ("il dominio non chiama mai Date.now()"), e cercare nel testo
-  // grezzo darebbe un falso positivo su ogni commento ben scritto.
-  const stripComments = (s) =>
-    s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-    const src = stripComments(fs.readFileSync(path.join(dir, file), "utf8"));
-    const requires = [...src.matchAll(/require\(["']([^"']+)["']\)/g)].map((x) => x[1]);
-    for (const r of requires) {
+  for (const { file, src } of readSources(dir)) {
+    // A RUNTIME domain/ può dipendere solo da decimal.js e dai suoi moduli.
+    // `import type` non conta: viene cancellato alla compilazione, quindi non
+    // porta dentro niente — è così che domain/ può usare i tipi condivisi di
+    // src/types.ts senza dipendere da nulla.
+    for (const r of runtimeImportsOf(src)) {
       assert.ok(
         r === "decimal.js" || r.startsWith("./"),
-        `${file} importa ${r}: domain/ può importare solo decimal.js e moduli locali`
+        `${file} importa ${r} a runtime: domain/ può importare solo decimal.js e moduli locali`
       );
+    }
+    // La lista dei vietati vale anche per i tipi: domain/ non deve conoscere
+    // nemmeno la FORMA di pg o del logger.
+    for (const { spec } of importsOf(src)) {
       for (const v of vietati) {
-        assert.ok(!r.includes(v), `${file} importa ${r}, vietato in domain/`);
+        assert.ok(!spec.includes(v), `${file} importa ${spec}, vietato in domain/`);
       }
     }
     // Il tempo è un PARAMETRO in domain/, non una lettura dell'orologio.

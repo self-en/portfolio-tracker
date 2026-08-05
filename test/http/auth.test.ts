@@ -1,12 +1,11 @@
 // Auth: firma/verifica/scadenza/tamper. Puro, nessun I/O, nessun HTTP.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = process.env.APP_PASSWORD || "test-password";
-process.env.SESSION_SECRET =
-  process.env.SESSION_SECRET || "0123456789abcdef0123456789abcdef0123456789";
+import test from "node:test";
+import assert from "node:assert/strict";
 
-const { signToken, verifyToken, verifyPassword, safeEqual } = require("../../src/http/auth");
+import { signToken, verifyToken, verifyPassword, safeEqual } from "../../src/http/auth";
 
 const SECRET = "un-segreto-di-almeno-32-caratteri-abcdef";
 const OTHER = "un-ALTRO-segreto-di-almeno-32-caratteri!";
@@ -63,7 +62,11 @@ test("manomettere il payload invalida la firma (non si può estendere exp)", () 
 });
 
 test("token malformati non lanciano, restituiscono un esito", () => {
-  for (const bad of [
+  // `unknown[]` e il cast qui sotto sono il PUNTO del test: il cookie arriva dal
+  // client, quindi verifyToken deve reggere anche ciò che il tipo vieta (un
+  // numero, un oggetto) senza lanciare. Tipizzare la lista come string[] proverebbe
+  // qualcos'altro.
+  const malformati: unknown[] = [
     undefined,
     null,
     "",
@@ -75,15 +78,16 @@ test("token malformati non lanciano, restituiscono un esito", () => {
     Buffer.from("{}").toString("base64url") + ".x",
     123,
     {},
-  ]) {
-    const r = verifyToken(bad, { secret: SECRET, now: 1 });
+  ];
+  for (const bad of malformati) {
+    const r = verifyToken(bad as string | undefined, { secret: SECRET, now: 1 });
     assert.equal(r.ok, false, `atteso rifiuto per ${JSON.stringify(bad)}`);
     assert.equal(typeof r.reason, "string");
   }
 });
 
 test("un payload firmato correttamente ma con v diversa è rifiutato", () => {
-  const crypto = require("node:crypto");
+  const crypto = require("node:crypto") as typeof import("node:crypto");
   const payload = Buffer.from(
     JSON.stringify({ v: 2, iat: 1, exp: 9_999_999_999, sid: "x" })
   ).toString("base64url");

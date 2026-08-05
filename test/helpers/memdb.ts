@@ -6,11 +6,12 @@
 // Cosa questi test NON possono dimostrare (va verificato sull'env di branch):
 //   - precisione NUMERIC: il NUMERIC di pg-mem è float-backed
 //   - i type parser di `pg`: pg-mem non passa dal protocollo wire
-//     (verificati direttamente in test/db/typeParsers.test.js)
+//     (verificati direttamente in test/db/typeParsers.test.ts)
 //   - funzioni finestra (`OVER`), advisory lock reali, indici unique parziali
-const { newDb } = require("pg-mem");
-const pool = require("../../src/db/pool");
-const { migrate } = require("../../src/db/migrate");
+import { newDb, DataType } from "pg-mem";
+import * as pool from "../../src/db/pool";
+import { migrate } from "../../src/db/migrate";
+import type { TestContext } from "node:test";
 
 function makeDb() {
   const db = newDb({
@@ -31,8 +32,8 @@ function makeDb() {
   for (const name of ["pg_advisory_lock", "pg_try_advisory_lock", "pg_advisory_unlock"]) {
     db.public.registerFunction({
       name,
-      args: [db.public.getType("int")],
-      returns: db.public.getType(name === "pg_advisory_lock" ? "text" : "bool"),
+      args: [db.public.getType(DataType.integer)],
+      returns: db.public.getType(name === "pg_advisory_lock" ? DataType.text : DataType.bool),
       implementation: () => (name === "pg_advisory_lock" ? "" : true),
     });
   }
@@ -42,9 +43,9 @@ function makeDb() {
   // solo il formato 'YYYY-MM' del raggruppamento per mese.
   db.public.registerFunction({
     name: "to_char",
-    args: [db.public.getType("date"), db.public.getType("text")],
-    returns: db.public.getType("text"),
-    implementation: (date, format) => {
+    args: [db.public.getType(DataType.date), db.public.getType(DataType.text)],
+    returns: db.public.getType(DataType.text),
+    implementation: (date: Date | string | null, format: string) => {
       if (date === null || date === undefined) return null;
       const iso = date instanceof Date ? date.toISOString().slice(0, 10) : String(date).slice(0, 10);
       if (format === "YYYY-MM") return iso.slice(0, 7);
@@ -71,11 +72,11 @@ async function freshMemDb() {
  * Esegue `fn`, ma SALTA il test se pg-mem non supporta il costrutto, invece di
  * riportare un fallimento fuorviante.
  */
-async function tolerantMem(t, fn) {
+async function tolerantMem(t: TestContext, fn: () => unknown | Promise<unknown>) {
   try {
     await fn();
   } catch (err) {
-    const msg = String(err?.message || "");
+    const msg = String((err as { message?: unknown })?.message || "");
     if (/not supported|NotSupported|🔨|does not exist|cannot cast/i.test(msg)) {
       t.skip(`limite di pg-mem: ${msg.split("\n")[0].slice(0, 120)}`);
       return;
@@ -84,4 +85,4 @@ async function tolerantMem(t, fn) {
   }
 }
 
-module.exports = { makeDb, freshMemDb, tolerantMem };
+export { makeDb, freshMemDb, tolerantMem };

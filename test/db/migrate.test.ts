@@ -3,14 +3,14 @@
 //
 // NON si asserisce la precisione numerica su pg-mem: il suo NUMERIC è
 // float-backed. Quella è competenza di src/domain/money.js e dei suoi test.
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = "test";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
+import test from "node:test";
+import assert from "node:assert/strict";
 
-const { newDb } = require("pg-mem");
-const { migrate, knownVersions } = require("../../src/db/migrate");
+import { newDb, DataType } from "pg-mem";
+import { migrate, knownVersions } from "../../src/db/migrate";
 
 function makeDb() {
   // noAstCoverageCheck: l'adapter `pg` di pg-mem esegue un controllo di copertura
@@ -22,14 +22,14 @@ function makeDb() {
   // pg-mem non implementa gli advisory lock: stub, così migrate() gira invariato.
   db.public.registerFunction({
     name: "pg_advisory_lock",
-    args: [db.public.getType("int")],
-    returns: db.public.getType("text"),
+    args: [db.public.getType(DataType.integer)],
+    returns: db.public.getType(DataType.text),
     implementation: () => "",
   });
   db.public.registerFunction({
     name: "pg_advisory_unlock",
-    args: [db.public.getType("int")],
-    returns: db.public.getType("bool"),
+    args: [db.public.getType(DataType.integer)],
+    returns: db.public.getType(DataType.bool),
     implementation: () => true,
   });
   const { Pool } = db.adapters.createPg();
@@ -95,7 +95,7 @@ test("un checksum modificato viene rilevato e NON blocca il boot", async () => {
 });
 
 test("le migrazioni registrate hanno checksum stabile e versioni uniche", () => {
-  const { migrations } = require("../../src/db/migrations");
+  const { migrations } = require("../../src/db/migrations") as typeof import("../../src/db/migrations");
   const versions = migrations.map((m) => m.version);
   assert.equal(new Set(versions).size, versions.length, "versioni duplicate");
   // Ordine crescente esplicito: nessun globbing di directory.

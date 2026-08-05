@@ -1,6 +1,6 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const bonds = require("../../src/domain/bonds");
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as bonds from "../../src/domain/bonds";
 
 // BTP 3,45% con scadenza 01/07/2030, cedola semestrale. coupon_rate è una
 // FRAZIONE annua (docs/decisions.md §9), quindi ogni cedola è 3,45/2 = 1,725
@@ -276,7 +276,7 @@ test("couponSchedule senza maturityDate lancia invece di indovinare", () => {
 });
 
 test("frequenze annuale, trimestrale e mensile", () => {
-  const mk = (f) =>
+  const mk = (f: number) =>
     bonds.couponSchedule({
       couponRate: "0.12",
       couponFrequency: f,

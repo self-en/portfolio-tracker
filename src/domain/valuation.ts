@@ -323,7 +323,10 @@ function valuePositions(args: ValuePositionsArgs) {
 function allocate<R extends Record<string, any>>(
   rows: readonly R[],
   keyFn: (r: R) => string,
-  labelFn: (r: R) => string
+  // Opzionale: senza, l'etichetta È la chiave. È ciò che il corpo fa già
+  // (`labelFn ? labelFn(r) : String(key)`), e dichiararla obbligatoria obbligava a
+  // passare una funzione solo per ottenere il default.
+  labelFn?: (r: R) => string
 ) {
   const groups = new Map();
   let total = ZERO;

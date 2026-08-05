@@ -1,8 +1,9 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const ret = require("../../src/domain/returns");
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as ret from "../../src/domain/returns";
+import { must } from "../helpers/must";
 
-const approx = (actual, expected, tol = 1e-6, msg = "") =>
+const approx = (actual: unknown, expected: number, tol = 1e-6, msg = "") =>
   assert.ok(
     Math.abs(Number(actual) - expected) < tol,
     `${msg} atteso ~${expected}, ottenuto ${actual}`
@@ -13,10 +14,10 @@ const approx = (actual, expected, tol = 1e-6, msg = "") =>
 // ---------------------------------------------------------------------------
 
 test("XIRR: -1000 a inizio 2024, +1100 a inizio 2025 ≈ 10%", () => {
-  const r = ret.xirr([
+  const r = must(ret.xirr([
     { date: "2024-01-01", amount: "-1000" },
     { date: "2025-01-01", amount: "1100" },
-  ]);
+  ]), "lo XIRR");
   assert.ok(r);
   // 2024 è bisestile (366 giorni), quindi il tasso annuo su base 365 è appena
   // sotto il 10%.
@@ -24,27 +25,27 @@ test("XIRR: -1000 a inizio 2024, +1100 a inizio 2025 ≈ 10%", () => {
 });
 
 test("XIRR: esattamente 365 giorni dà esattamente il 10%", () => {
-  const r = ret.xirr([
+  const r = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2026-01-01", amount: "1100" },
-  ]);
+  ]), "lo XIRR");
   approx(r.rate, 0.1, 1e-8);
 });
 
 test("XIRR: versamenti periodici irregolari", () => {
-  const r = ret.xirr([
+  const r = must(ret.xirr([
     { date: "2024-01-15", amount: "-5000" },
     { date: "2024-04-03", amount: "-2500" },
     { date: "2024-09-21", amount: "-1000" },
     { date: "2025-02-11", amount: "-3000" },
     { date: "2026-08-04", amount: "13500" },
-  ]);
+  ]), "lo XIRR");
   assert.ok(r, "deve convergere");
   // Verifica INDIPENDENTE: il NPV al tasso trovato deve essere ~0. La tolleranza è
   // 1e-3 perché il tasso restituito è arrotondato a 8 decimali, e su flussi
   // dell'ordine di 13.500 un errore di 1e-8 sul tasso vale ~1e-5 di NPV. In
   // termini relativi resta sotto 1e-7.
-  const cal = require("../../src/domain/calendar");
+  const cal = require("../../src/domain/calendar") as typeof import("../../src/domain/calendar");
   const flows = [
     { date: "2024-01-15", amount: "-5000" },
     { date: "2024-04-03", amount: "-2500" },
@@ -60,18 +61,18 @@ test("XIRR: versamenti periodici irregolari", () => {
 });
 
 test("XIRR: una perdita dà un tasso negativo", () => {
-  const r = ret.xirr([
+  const r = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2026-01-01", amount: "800" },
-  ]);
+  ]), "lo XIRR");
   approx(r.rate, -0.2, 1e-8);
 });
 
 test("XIRR: perdita quasi totale, il dominio resta rispettato", () => {
-  const r = ret.xirr([
+  const r = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2026-01-01", amount: "1" },
-  ]);
+  ]), "lo XIRR");
   assert.ok(r);
   assert.ok(Number(r.rate) > -1, "il tasso non può scendere a -100% o sotto");
   approx(r.rate, -0.999, 1e-3);
@@ -101,27 +102,27 @@ test("XIRR: meno di due flussi → null", () => {
 });
 
 test("XIRR: i flussi a zero sono ignorati, non contati", () => {
-  const withZero = ret.xirr([
+  const withZero = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2025-06-01", amount: "0" },
     { date: "2026-01-01", amount: "1100" },
-  ]);
-  const without = ret.xirr([
+  ]), "lo XIRR");
+  const without = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2026-01-01", amount: "1100" },
-  ]);
+  ]), "lo XIRR");
   assert.equal(withZero.rate, without.rate);
 });
 
 test("XIRR: i flussi non ordinati danno lo stesso risultato", () => {
-  const a = ret.xirr([
+  const a = must(ret.xirr([
     { date: "2026-01-01", amount: "1100" },
     { date: "2025-01-01", amount: "-1000" },
-  ]);
-  const b = ret.xirr([
+  ]), "lo XIRR");
+  const b = must(ret.xirr([
     { date: "2025-01-01", amount: "-1000" },
     { date: "2026-01-01", amount: "1100" },
-  ]);
+  ]), "lo XIRR");
   assert.equal(a.rate, b.rate);
 });
 
@@ -136,11 +137,13 @@ test("XIRR: insieme patologico dove Newton fallisce → la BISEZIONE converge", 
     { date: "2020-01-04", amount: "999000" },
     { date: "2026-01-01", amount: "1" },
   ];
+  // NON si usa `must`: il commento in fondo dice che null è un esito accettato
+  // ("un rifiuto onesto"), quindi pretendere un valore cambierebbe il test.
   const r = ret.xirr(flows);
   if (r !== null) {
     // Se restituisce un tasso, quel tasso deve essere una radice vera.
     const start = "2020-01-01";
-    const cal = require("../../src/domain/calendar");
+    const cal = require("../../src/domain/calendar") as typeof import("../../src/domain/calendar");
     const cf = flows.map((f) => ({ amount: f.amount, days: cal.daysBetween(start, f.date) }));
     const value = Number(ret.npv(cf, r.rate).toFixed());
     assert.ok(Math.abs(value) < 1e-3, `NPV alla radice dovrebbe essere ~0, è ${value}`);
@@ -165,6 +168,9 @@ test("XIRR non restituisce mai NaN o Infinity", () => {
     ],
   ];
   for (const flows of casi) {
+    // NON si usa `must` qui: su questi input patologici la NON convergenza (null) è
+    // un esito legittimo, ed è esattamente ciò che il test vuole permettere. Quello
+    // che vieta è un tasso NaN o infinito.
     const r = ret.xirr(flows);
     if (r !== null) {
       assert.ok(Number.isFinite(Number(r.rate)), `tasso non finito: ${r.rate}`);
@@ -174,23 +180,23 @@ test("XIRR non restituisce mai NaN o Infinity", () => {
 });
 
 test("portfolioXirr aggiunge il valore terminale come incasso finale", () => {
-  const r = ret.portfolioXirr(
+  const r = must(ret.portfolioXirr(
     [{ date: "2025-01-01", amountBase: "-1000" }],
     "1100",
     "2026-01-01"
-  );
+  ), "lo XIRR");
   approx(r.rate, 0.1, 1e-8);
 });
 
 test("portfolioXirr senza valore terminale usa solo i flussi", () => {
-  const r = ret.portfolioXirr(
+  const r = must(ret.portfolioXirr(
     [
       { date: "2025-01-01", amountBase: "-1000" },
       { date: "2026-01-01", amountBase: "1100" },
     ],
     null,
     "2026-01-01"
-  );
+  ), "lo XIRR");
   approx(r.rate, 0.1, 1e-8);
 });
 
@@ -288,11 +294,11 @@ test("TWR e XIRR DIVERGONO quando il timing conta (è esattamente il loro scopo)
   assert.ok(Number(t.total) > 0, "il TWR resta positivo: i rendimenti sono stati buoni");
 
   // Ma l'investitore ha messo 10.000 e ne ha 9.450: ha PERSO denaro.
-  const x = ret.xirr([
+  const x = must(ret.xirr([
     { date: "2024-01-01", amount: "-1000" },
     { date: "2025-01-01", amount: "-9000" },
     { date: "2026-01-01", amount: "9450" },
-  ]);
+  ]), "lo XIRR");
   assert.ok(x, "lo XIRR deve convergere");
   assert.ok(Number(x.rate) < 0, `lo XIRR deve essere negativo, è ${x.rate}`);
   assert.ok(
@@ -398,8 +404,8 @@ test("byYear separa gli anni misurando dalla chiusura precedente", () => {
     { date: "2026-12-31", value: "1320" },
   ];
   const rows = ret.byYear(points, []);
-  const y2025 = rows.find((r) => r.year === "2025");
-  const y2026 = rows.find((r) => r.year === "2026");
+  const y2025 = must(rows.find((r) => r.year === "2025"), "la riga del 2025");
+  const y2026 = must(rows.find((r) => r.year === "2026"), "la riga del 2026");
   approx(y2025.twr, 0.1, 1e-9);
   approx(y2026.twr, 0.2, 1e-9, "il 2026 si misura dal 31/12/2025, non dal 1/1");
 });

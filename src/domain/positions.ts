@@ -184,7 +184,10 @@ function buildPositions(txs: readonly TxLike[], opts: BuildPositionsOptions = {}
     throw new Error(`metodo di costo non supportato: ${method} (v1 implementa solo AVERAGE)`);
   }
 
-  const warnings = [];
+  // Dichiarato, non lasciato inferire: un array vuoto senza tipo si allarga sui
+  // push e finisce per essere l'UNIONE delle forme spinte, così un lettore che
+  // cerca `requested` sull'oversell trova un tipo che a volte non lo ha.
+  const warnings: DomainWarning[] = [];
   const positions = new Map();
   const cash: Record<string, Decimal> = {}; // saldo per valuta, ricavato gratis dal ledger
   const flows = []; // {date, amountBase} flussi esterni per TWR/XIRR

@@ -1,9 +1,9 @@
 // computeAmounts: la matematica dietro POST /transactions e /transactions/preview.
 // Pura, quindi testabile direttamente — ed è lo stesso codice per entrambi gli
 // endpoint, che è ciò che garantisce che l'anteprima mostri quello che verrà scritto.
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { computeAmounts } = require("../../src/domain/txAmounts");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { computeAmounts } from "../../src/domain/txAmounts";
 
 const EQ = { quoteConvention: "PRICE", assetClass: "EQUITY", currency: "EUR" };
 const BOND = {
@@ -18,7 +18,7 @@ const BOND = {
   dayCount: "ACT/ACT-ICMA",
 };
 
-const n = (s) => Number(s);
+const n = (s: string | null) => Number(s);
 
 test("BUY azionario: netto = lordo + commissioni + imposte, con segno negativo", () => {
   const r = computeAmounts(
@@ -187,8 +187,11 @@ test("tutti i valori restituiti sono STRINGHE, mai number", () => {
     { type: "BUY", tradeDate: "2026-04-02", nominal: "10000", price: "98.5", fees: "8" },
     BOND
   );
+  // Accesso per chiave DINAMICO: il test verifica una proprietà trasversale
+  // ("nessun campo è un number"), quindi i nomi sono dati, non codice.
+  const campi = r as unknown as Record<string, unknown>;
   for (const k of ["grossAmount", "netAmount", "accruedInterest", "quantity", "nominal"]) {
-    assert.equal(typeof r[k], "string", `${k} deve essere una stringa`);
+    assert.equal(typeof campi[k], "string", `${k} deve essere una stringa`);
   }
 });
 

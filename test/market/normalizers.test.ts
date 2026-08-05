@@ -2,25 +2,34 @@
 //
 // È questo che rende ogni normalizzatore una funzione pura per sempre: le fixture
 // sono risposte vere di Yahoo e Frankfurter, non forme indovinate.
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const path = require("node:path");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = "test";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
 
-const yp = require("../../src/market/yahooProvider");
-const fx = require("../../src/market/fxProvider");
-const { tolerant } = require("../../src/market/tolerant");
+import * as yp from "../../src/market/yahooProvider";
+import * as fx from "../../src/market/fxProvider";
+import { tolerant } from "../../src/market/tolerant";
+import { importsOf, readSources } from "../helpers/sourceScan";
+import { must } from "../helpers/must";
 
-const fixture = (rel) => require(path.join(__dirname, "..", "fixtures", rel));
+/**
+ * Una fixture catturata da un provider reale. `any` è deliberato: il punto di un
+ * normalizzatore è proprio accettare un payload non tipizzato di cui non
+ * controlliamo la forma, e dichiararne una qui sarebbe una forma INVENTATA che
+ * nasconde ciò che il test deve dimostrare.
+ */
+const fixture = (rel: string): any =>
+  require(path.join(__dirname, "..", "fixtures", rel));
 
 // ---------------------------------------------------------------------------
 // Quotazioni
 // ---------------------------------------------------------------------------
 
 test("normalizeQuote sulla fixture reale EUNL.DE", () => {
-  const q = yp.normalizeQuote(fixture("yahoo/quote-EUNL.DE.json"));
+  const q = must(yp.normalizeQuote(fixture("yahoo/quote-EUNL.DE.json")), "la quotazione");
   assert.equal(q.symbol, "EUNL.DE");
   assert.equal(q.price, "127.325");
   assert.equal(q.currency, "EUR");
@@ -35,8 +44,8 @@ test("normalizeQuote sulla fixture reale EUNL.DE", () => {
 test("normalizeQuote sulla fixture multi-simbolo di quoteCombine", () => {
   const rows = fixture("yahoo/quoteCombine-multi.json").map(yp.normalizeQuote);
   assert.equal(rows.length, 3);
-  assert.deepEqual(rows.map((r) => r.symbol), ["AAPL", "MSFT", "EUNL.DE"]);
-  assert.deepEqual(rows.map((r) => r.currency), ["USD", "USD", "EUR"]);
+  assert.deepEqual(rows.map((r: any) => r.symbol), ["AAPL", "MSFT", "EUNL.DE"]);
+  assert.deepEqual(rows.map((r: any) => r.currency), ["USD", "USD", "EUR"]);
   for (const r of rows) assert.equal(typeof r.price, "string");
 });
 
@@ -222,7 +231,10 @@ test("normalizeSearch scarta le voci non-Yahoo e senza simbolo", () => {
 // ---------------------------------------------------------------------------
 
 test("normalizeUpcomingDividend legge ex-date e pay-date da calendarEvents", () => {
-  const up = yp.normalizeUpcomingDividend(fixture("yahoo/quoteSummary-AAPL.json"));
+  const up = must(
+    yp.normalizeUpcomingDividend(fixture("yahoo/quoteSummary-AAPL.json")),
+    "il dividendo annunciato"
+  );
   assert.equal(up.exDate, "2026-08-10");
   assert.equal(up.payDate, "2026-08-13");
 });
@@ -250,7 +262,12 @@ test("tolerant restituisce err.result quando la validazione zod LANCIA", () => {
     events: [],
   };
   const boom = () => {
-    const e = new Error("validazione fallita");
+    // La forma REALE dell'errore di yahoo-finance2: un Error con `result` (il
+    // payload comunque decodificato) e `errors` (le chiavi inattese) attaccati.
+    const e = new Error("validazione fallita") as Error & {
+      result?: unknown;
+      errors?: string[];
+    };
     e.name = "FailedYahooValidationError";
     e.result = drifted;
     e.errors = ["Unexpected key campoNuovoInatteso", "altro problema", "terzo", "quarto"];
@@ -302,7 +319,7 @@ test("normalizeFrankfurter legge la forma ARRAY della v2 (fixture reale, data si
     assert.equal(r.date, "2026-08-04");
     assert.equal(typeof r.rate, "string");
   }
-  const usd = recs.find((r) => r.quote === "USD");
+  const usd = must(recs.find((r) => r.quote === "USD"), "il record USD");
   assert.equal(usd.rate, "1.1523");
 });
 
@@ -324,7 +341,7 @@ test("normalizeFrankfurter tollera ANCHE la forma a mappa della v1 (piatta e ann
     rates: { USD: 1.1523, GBP: 0.85651 },
   });
   assert.equal(piatta.length, 2);
-  assert.equal(piatta.find((r) => r.quote === "USD").rate, "1.1523");
+  assert.equal(must(piatta.find((r) => r.quote === "USD"), "il record USD").rate, "1.1523");
 
   const annidata = fx.normalizeFrankfurter({
     base: "EUR",
@@ -360,7 +377,10 @@ test("normalizeFrankfurter su input inattesi restituisce lista vuota, non lancia
 test("numStr non produce MAI notazione esponenziale", () => {
   assert.equal(yp.numStr(127.325), "127.325");
   assert.equal(yp.numStr(0), "0");
-  assert.ok(!yp.numStr(0.0000001).includes("e"), "1e-7 non deve restare esponenziale");
+  assert.ok(
+    !must(yp.numStr(0.0000001), "numStr(1e-7)").includes("e"),
+    "1e-7 non deve restare esponenziale"
+  );
   assert.equal(yp.numStr(80791200), "80791200");
   assert.equal(yp.numStr(null), null);
   assert.equal(yp.numStr(undefined), null);
@@ -431,13 +451,15 @@ test("pinoAdapter fornisce TUTTI E CINQUE i metodi che la libreria valida", () =
   // Il logger di DEFAULT di yahoo-finance2 è console.*, che su questa piattaforma
   // NON viene inoltrato via OTLP. La libreria valida la presenza dei metodi in
   // costruzione: uno mancante fa fallire il `new`, e `dir` è quello che si dimentica.
+  const adapter = yp.pinoAdapter as unknown as Record<string, unknown>;
   for (const m of ["info", "warn", "error", "debug", "dir"]) {
-    assert.equal(typeof yp.pinoAdapter[m], "function", `manca ${m}`);
+    assert.equal(typeof adapter[m], "function", `manca ${m}`);
   }
 });
 
 test("pinoAdapter non lancia su oggetti circolari", () => {
-  const circular = { a: 1 };
+  // Il letterale non può riferirsi a se stesso: il tipo va dichiarato.
+  const circular: { a: number; self?: unknown } = { a: 1 };
   circular.self = circular;
   assert.doesNotThrow(() => yp.pinoAdapter.dir(circular));
   assert.doesNotThrow(() => yp.pinoAdapter.info("stringa", 42, null, undefined));
@@ -448,18 +470,13 @@ test("pinoAdapter non lancia su oggetti circolari", () => {
 // ---------------------------------------------------------------------------
 
 test("market/ non importa MAI domain/ (confine architetturale)", () => {
-  const fs = require("node:fs");
   const dir = path.join(__dirname, "..", "..", "src", "market");
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-    const src = fs
-      .readFileSync(path.join(dir, file), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-    const requires = [...src.matchAll(/require\(["']([^"']+)["']\)/g)].map((x) => x[1]);
-    for (const r of requires) {
+  for (const { file, src } of readSources(dir)) {
+    // Anche i soli tipi: market/ non deve conoscere nemmeno la forma di domain/.
+    for (const { spec } of importsOf(src)) {
       assert.ok(
-        !r.includes("domain/"),
-        `${file} importa ${r}: market/ normalizza i payload e li passa a repo/, non tocca domain/`
+        !spec.includes("domain/"),
+        `${file} importa ${spec}: market/ normalizza i payload e li passa a repo/, non tocca domain/`
       );
     }
   }

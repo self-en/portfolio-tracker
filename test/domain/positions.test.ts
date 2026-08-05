@@ -1,10 +1,14 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const pos = require("../../src/domain/positions");
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as pos from "../../src/domain/positions";
+import { must } from "../helpers/must";
+import type { TxSpec } from "../helpers/txSpec";
+import type Decimal from "decimal.js";
 
 let seq = 0;
+
 /** Helper: costruisce una transazione con i default sensati. */
-function tx(o) {
+function tx(o: TxSpec) {
   return {
     id: o.id ?? ++seq,
     portfolio_id: 1,
@@ -26,8 +30,16 @@ function tx(o) {
   };
 }
 
-const P = (r, id = 1) => r.positions.get(id);
-const num = (dec) => Number(dec.toFixed());
+const P = (r: ReturnType<typeof pos.buildPositions>, id = 1) => r.positions.get(id);
+
+/**
+ * Il valore decimale come number, per confrontarlo con un letterale.
+ *
+ * Accetta anche null perché molti campi valorizzati lo sono quando manca il
+ * prezzo, e `must` fa fallire il test dicendo QUALE valore mancava invece di
+ * lasciare un "cannot read properties of null" senza nome.
+ */
+const num = (dec: Decimal | null | undefined) => Number(must(dec, "il valore decimale").toFixed());
 
 test("acquisto/acquisto/vendita con COSTO MEDIO PONDERATO", () => {
   // 10 @ 100 (comm 5) → carico 1005; 10 @ 120 (comm 5) → carico 2210
@@ -306,7 +318,9 @@ test("asOf ignora le transazioni successive", () => {
 });
 
 test("un metodo di costo non supportato lancia invece di calcolare male", () => {
-  assert.throws(() => pos.buildPositions([], { method: "FIFO" }), /FIFO/);
+  // Il cast è il punto: "FIFO" non è un metodo che il tipo ammette, e serve
+  // proprio verificare che a runtime venga RIFIUTATO invece di calcolato a media.
+  assert.throws(() => pos.buildPositions([], { method: "FIFO" as "AVERAGE" }), /FIFO/);
 });
 
 test("più strumenti restano separati", () => {
@@ -356,7 +370,12 @@ test("NESSUN DOPPIO CONTEGGIO: qtyAdj × closeAggiustato è costante attraverso 
   const s = pos.splitAdjustedQuantitySeries(txs, dates);
   // Serie close come la restituisce Yahoo: retro-aggiustata, quindi 80 anche
   // PRIMA dello split, quando il titolo scambiava davvero a 320.
-  const adjustedClose = { "2020-06-01": 80, "2020-08-30": 80, "2020-08-31": 80, "2020-09-01": 80 };
+  const adjustedClose: Record<string, number> = {
+    "2020-06-01": 80,
+    "2020-08-30": 80,
+    "2020-08-31": 80,
+    "2020-09-01": 80,
+  };
   const values = s.map((x) => num(x.quantity) * adjustedClose[x.date]);
   assert.deepEqual(values, [3200, 3200, 3200, 3200], "il valore non deve saltare sullo split");
 });

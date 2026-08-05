@@ -3,15 +3,15 @@
 // Serve perché pg-mem non passa dal protocollo wire e quindi non può dimostrare
 // questo contratto (vedi la nota in test/repo/repo.test.js), mentre è il contratto
 // da cui dipende tutta la correttezza numerica dell'app (docs/decisions.md §1).
-const test = require("node:test");
-const assert = require("node:assert/strict");
+// Per PRIMO: imposta l'env prima che qualsiasi import carichi src/config.
+import "../helpers/env";
 
-process.env.APP_PASSWORD = "test";
-process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef0123456789";
+import test from "node:test";
+import assert from "node:assert/strict";
 
 // Il require registra i parser come effetto collaterale globale su `pg`.
 require("../../src/db/pool");
-const { types } = require("pg");
+import { types } from "pg";
 
 const OID = { NUMERIC: 1700, INT8: 20, DATE: 1082 };
 
