@@ -3,15 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "main": "server.js",
+  "main": "build/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev:api": "SCHEDULER_ENABLED=false node server.js",
+    "start": "node build/server.js",
+    "dev:api": "SCHEDULER_ENABLED=false tsx watch src/server.ts",
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web install --include=dev && npm --prefix web run build",
-    "test": "node --test \"test/**/*.test.js\"",
-    "test:domain": "node --test \"test/domain/**/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
+    "test": "node --import tsx --test \"test/**/*.test.js\"",
+    "test:domain": "node --import tsx --test \"test/domain/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
+    "build": "tsc -p tsconfig.json && npm run build:sql",
+    "build:sql": "mkdir -p build/db/migrations && cp src/db/migrations/*.sql build/db/migrations/",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
@@ -28,6 +31,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "pg-mem": "^3.0.14"
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^4.17.25",
+    "@types/node": "^26.1.2",
+    "pg-mem": "^3.0.14",
+    "tsx": "^4.23.7",
+    "typescript": "^5.9.3"
   }
 }

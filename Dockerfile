@@ -18,13 +18,27 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+# Stage 2b — compilazione del backend TypeScript (tsc -> build/).
+#
+# Anche questo stage è inchiodato al builder: l'output è JavaScript, identico su
+# ogni architettura, e compilarlo sotto QEMU per il leg arm64 sarebbe tempo
+# regalato. Le migrazioni .sql vengono copiate accanto al JS emesso perché
+# db/migrations/index le legge da __dirname a runtime.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS server
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
+
 # Stage 3 — immagine finale: nessun toolchain, nessuna sorgente della SPA.
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json server.js ./
-COPY src/ ./src/
+COPY package.json ./
+COPY --from=server /app/build ./build
 COPY --from=web /web/dist ./web/dist
 EXPOSE 3000
 
@@ -35,4 +49,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD wget -qO- http://localhost:3000/healthz || exit 1
 USER node
-CMD ["node", "server.js"]
+CMD ["node", "build/server.js"]
