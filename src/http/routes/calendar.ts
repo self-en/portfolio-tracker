@@ -1,4 +1,3 @@
-import express from "express";
 import logger from "../../logger";
 import * as eventsRepo from "../../repo/events";
 import * as txRepo from "../../repo/transactions";
@@ -9,11 +8,11 @@ import * as positions from "../../domain/positions";
 import * as cal from "../../domain/calendar";
 import { d, money, toBase, ZERO, HUNDRED } from "../../domain/money";
 import * as S from "../serialize";
-import { asyncHandler, notFound, conflict, validation } from "../errors";
+import { notFound, conflict, validation } from "../errors";
 import { z, query, body, params, idParam, dateString } from "../validate";
 import * as schemas from "../schemas";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -53,9 +52,8 @@ function estimateGross(ev, instrument, quantityAtDate) {
   return qty.times(d(ev.amountPerUnit));
 }
 
-router.get(
-  "/",
-  query(
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/", { preHandler: [query(
     z.object({
       from: dateString().optional(),
       to: dateString().optional(),
@@ -63,8 +61,7 @@ router.get(
       kind: z.string().optional(),
       status: z.string().optional(),
     })
-  ),
-  asyncHandler(async (req: Request, res: Response) => {
+  )] }, async (req, reply) => {
     const { portfolioId, kind, status } = req.valid.query;
     const portfolio = portfolioId
       ? await portfoliosRepo.byId(portfolioId)
@@ -85,7 +82,7 @@ router.get(
       status: status ? status.split(",") : undefined,
     });
     if (events.length === 0) {
-      return res.json({ from, to, events: [], monthlyTotals: [], warnings: [] });
+      return reply.send({ from, to, events: [], monthlyTotals: [], warnings: [] });
     }
 
     // Quantità possedute ALLA DATA DI CIASCUN EVENTO: una cedola su un titolo
@@ -170,7 +167,7 @@ router.get(
       }
     }
 
-    return res.json({
+    return reply.send({
       from,
       to,
       baseCcy: portfolio.baseCcy,
@@ -187,22 +184,9 @@ router.get(
         })),
       warnings,
     });
-  })
-);
+  });
 
-/**
- * CONFERMA UN EVENTO → crea la transazione corrispondente.
- *
- * In un'app a inserimento manuale questo trasforma il calendario nel canale
- * PRIMARIO di data entry: l'utente vede "cedola BTP il 1° luglio, ~172,50" e con un
- * click ha il movimento registrato, con il lordo precompilato dallo scadenzario e
- * solo la ritenuta da inserire.
- */
-router.post(
-  "/:id/confirm",
-  params(z.object({ id: idParam() })),
-  body(schemas.confirmEventBody),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/:id/confirm", { preHandler: [params(z.object({ id: idParam() })), body(schemas.confirmEventBody)] }, async (req, reply) => {
     const ev = await eventsRepo.byId(req.valid.params.id);
     if (!ev) throw notFound("evento non trovato");
     if (ev.transactionId) {
@@ -292,14 +276,10 @@ router.post(
       "[calendar] evento confermato e movimento creato"
     );
 
-    return res.status(201).json({ event: updated, transaction: created });
-  })
-);
+    return reply.code(201).send({ event: updated, transaction: created });
+  });
 
-router.delete(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.delete("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const ev = await eventsRepo.byId(req.valid.params.id);
     if (!ev) throw notFound("evento non trovato");
     if (ev.transactionId) {
@@ -308,8 +288,17 @@ router.delete(
       });
     }
     await eventsRepo.remove(ev.id);
-    return res.status(204).end();
-  })
-);
+    return reply.code(204).send();
+  });
+};
+
+/**
+ * CONFERMA UN EVENTO → crea la transazione corrispondente.
+ *
+ * In un'app a inserimento manuale questo trasforma il calendario nel canale
+ * PRIMARIO di data entry: l'utente vede "cedola BTP il 1° luglio, ~172,50" e con un
+ * click ha il movimento registrato, con il lordo precompilato dallo scadenzario e
+ * solo la ritenuta da inserire.
+ */
 
 export { router, confidenceOf, estimateGross };

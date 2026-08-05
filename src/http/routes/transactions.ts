@@ -1,4 +1,3 @@
-import express from "express";
 import * as txRepo from "../../repo/transactions";
 import * as instrumentsRepo from "../../repo/instruments";
 import * as portfoliosRepo from "../../repo/portfolios";
@@ -6,13 +5,13 @@ import * as fxRepo from "../../repo/fx";
 import { computeAmounts } from "../../domain/txAmounts";
 import * as positions from "../../domain/positions";
 import { money, qty as fmtQty, d } from "../../domain/money";
-import { asyncHandler, notFound, validation } from "../errors";
+import { notFound, validation } from "../errors";
 import { z, body, query, params, parse, idParam } from "../validate";
 import * as schemas from "../schemas";
 import { errCode } from "../../util/err";
 import { enqueueBackfill } from "../../market/refresher";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 /**
  * Prepara il record da persistere: risolve portafoglio, strumento e cambio, poi
@@ -84,27 +83,13 @@ async function prepare(input) {
   return { record, instrument, amounts, warnings, fxSource };
 }
 
-router.get(
-  "/",
-  query(schemas.listTransactionsQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/", { preHandler: [query(schemas.listTransactionsQuery)] }, async (req, reply) => {
     const page = await txRepo.list(req.valid.query);
-    return res.json(page);
-  })
-);
+    return reply.send(page);
+  });
 
-/**
- * Anteprima: NESSUNA SCRITTURA. Restituisce gli importi derivati e la posizione
- * risultante.
- *
- * È ciò che rende il form affidabile: l'utente vede la conseguenza prima di
- * confermare, e il calcolo del rateo vive lato server invece di essere duplicato
- * in React.
- */
-router.post(
-  "/preview",
-  body(schemas.previewTransaction),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/preview", { preHandler: [body(schemas.previewTransaction)] }, async (req, reply) => {
     const input = req.valid.body;
     const { record, instrument, amounts, warnings, fxSource } = await prepare(input);
 
@@ -154,7 +139,7 @@ router.post(
       }
     }
 
-    return res.json({
+    return reply.send({
       grossAmount: record.grossAmount,
       netAmount: record.netAmount,
       accruedInterest: record.accruedInterest,
@@ -167,13 +152,9 @@ router.post(
       resultingPosition,
       warnings,
     });
-  })
-);
+  });
 
-router.post(
-  "/",
-  body(schemas.createTransaction),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/", { preHandler: [body(schemas.createTransaction)] }, async (req, reply) => {
     const { record, warnings } = await prepare(req.valid.body);
     const created = await txRepo.create(record);
 
@@ -190,25 +171,16 @@ router.post(
       }
     }
 
-    return res.status(201).json({ ...created, warnings });
-  })
-);
+    return reply.code(201).send({ ...created, warnings });
+  });
 
-router.get(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const tx = await txRepo.byId(req.valid.params.id);
     if (!tx) throw notFound("movimento non trovato");
-    return res.json(tx);
-  })
-);
+    return reply.send(tx);
+  });
 
-router.patch(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  body(schemas.updateTransaction),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.patch("/:id", { preHandler: [params(z.object({ id: idParam() })), body(schemas.updateTransaction)] }, async (req, reply) => {
     const existing = await txRepo.byId(req.valid.params.id);
     if (!existing) throw notFound("movimento non trovato");
 
@@ -220,18 +192,23 @@ router.patch(
     const { record, warnings } = await prepare(validated);
 
     const updated = await txRepo.update(existing.id, record);
-    return res.json({ ...updated, warnings });
-  })
-);
+    return reply.send({ ...updated, warnings });
+  });
 
-router.delete(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.delete("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const ok = await txRepo.remove(req.valid.params.id);
     if (!ok) throw notFound("movimento non trovato");
-    return res.status(204).end();
-  })
-);
+    return reply.code(204).send();
+  });
+};
+
+/**
+ * Anteprima: NESSUNA SCRITTURA. Restituisce gli importi derivati e la posizione
+ * risultante.
+ *
+ * È ciò che rende il form affidabile: l'utente vede la conseguenza prima di
+ * confermare, e il calcolo del rateo vive lato server invece di essere duplicato
+ * in React.
+ */
 
 export { router, prepare };

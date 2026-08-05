@@ -7,7 +7,6 @@
 // I prezzi e i cambi NON vengono esportati per default: sono rigenerabili dai
 // provider, e includerli farebbe un dump da megabyte per proteggere dati che non
 // sono preziosi. Ciò che è irreparabile sono strumenti e movimenti.
-import express from "express";
 import logger from "../../logger";
 import { runImport } from "../../repo/importer";
 import * as portfoliosRepo from "../../repo/portfolios";
@@ -15,26 +14,23 @@ import * as instrumentsRepo from "../../repo/instruments";
 import * as txRepo from "../../repo/transactions";
 import * as eventsRepo from "../../repo/events";
 import * as pricesRepo from "../../repo/prices";
-import { asyncHandler, validation, conflict } from "../errors";
+import { validation, conflict } from "../errors";
 import { z, body, query } from "../validate";
-import type { Request, Response } from "express";
 import { regenerateProjected } from "./instruments";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 const FORMAT_VERSION = 1;
 
-router.get(
-  "/export",
-  query(
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/export", { preHandler: [query(
     z.object({
       includePrices: z
         .enum(["true", "false"])
         .transform((v) => v === "true")
         .optional(),
     })
-  ),
-  asyncHandler(async (req: Request, res: Response) => {
+  )] }, async (req, reply) => {
     const includePrices = !!req.valid.query.includePrices;
 
     const portfolios = await portfoliosRepo.list();
@@ -81,31 +77,14 @@ router.get(
       }
     }
 
-    res.set(
+    reply.header(
       "Content-Disposition",
       `attachment; filename="portfolio-tracker-${new Date().toISOString().slice(0, 10)}.json"`
     );
-    return res.json(dump);
-  })
-);
+    return reply.send(dump);
+  });
 
-const importBody = z.object({
-  format: z.literal("portfolio-tracker").optional(),
-  version: z.number().optional(),
-  portfolios: z.array(z.record(z.string(), z.unknown())).default([]),
-  instruments: z.array(z.record(z.string(), z.unknown())).default([]),
-  transactions: z.array(z.record(z.string(), z.unknown())).default([]),
-  events: z.array(z.record(z.string(), z.unknown())).default([]),
-  manualPrices: z.array(z.record(z.string(), z.unknown())).default([]),
-  // Senza `replace: true` l'import è ADDITIVO e non distrugge nulla: il default
-  // sicuro è quello che non perde dati.
-  replace: z.boolean().default(false),
-});
-
-router.post(
-  "/import",
-  body(importBody),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/import", { preHandler: [body(importBody)] }, async (req, reply) => {
     const dump = req.valid.body;
     if (dump.version && dump.version > FORMAT_VERSION) {
       throw validation(
@@ -187,8 +166,21 @@ router.post(
     }
 
     logger.info(stats, "[import] import completato");
-    return res.json({ imported: stats });
-  })
-);
+    return reply.send({ imported: stats });
+  });
+};
+
+const importBody = z.object({
+  format: z.literal("portfolio-tracker").optional(),
+  version: z.number().optional(),
+  portfolios: z.array(z.record(z.string(), z.unknown())).default([]),
+  instruments: z.array(z.record(z.string(), z.unknown())).default([]),
+  transactions: z.array(z.record(z.string(), z.unknown())).default([]),
+  events: z.array(z.record(z.string(), z.unknown())).default([]),
+  manualPrices: z.array(z.record(z.string(), z.unknown())).default([]),
+  // Senza `replace: true` l'import è ADDITIVO e non distrugge nulla: il default
+  // sicuro è quello che non perde dati.
+  replace: z.boolean().default(false),
+});
 
 export { router, FORMAT_VERSION };

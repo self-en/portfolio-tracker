@@ -1,6 +1,5 @@
 // La superficie CALCOLATA. Queste route orchestrano: repo → domain → risposta.
 // Nessuna logica di business qui dentro, nessun SQL.
-import express from "express";
 import { z, dateString } from "../validate";
 import * as portfoliosRepo from "../../repo/portfolios";
 import * as txRepo from "../../repo/transactions";
@@ -13,12 +12,11 @@ import * as returns from "../../domain/returns";
 import * as cal from "../../domain/calendar";
 import { d, ZERO } from "../../domain/money";
 import * as S from "../serialize";
-import { asyncHandler, validation } from "../errors";
+import { validation } from "../errors";
 import { query } from "../validate";
 import * as schemas from "../schemas";
-import type { Request, Response } from "express";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 /** Oggi in UTC. Il tempo entra nel sistema QUI: domain/ lo riceve come parametro. */
 const today = () => new Date().toISOString().slice(0, 10);
@@ -120,10 +118,8 @@ async function loadValuation({ portfolioId, asOf, includeAccrued }) {
   return { portfolio, asOf: at, ledger, instruments, built, valued, fxLookup, currencies };
 }
 
-router.get(
-  "/summary",
-  query(schemas.portfolioQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/summary", { preHandler: [query(schemas.portfolioQuery)] }, async (req, reply) => {
     const { portfolioId, asOf, includeAccrued } = req.valid.query;
     const ctx = await loadValuation({ portfolioId, asOf, includeAccrued });
     const { valued, portfolio } = ctx;
@@ -171,7 +167,7 @@ router.get(
     );
     const byCurrency = valuation.allocate(valued.rows, (r) => r.currency, (r) => r.currency);
 
-    return res.json({
+    return reply.send({
       asOf: ctx.asOf,
       portfolioId: portfolio.id,
       baseCcy: portfolio.baseCcy,
@@ -199,13 +195,9 @@ router.get(
         "Non è consulenza fiscale: plusvalenze realizzate, redditi e plusvalenze latenti sono voci separate. Riconcilia con l'estratto conto del broker.",
       warnings: valued.warnings,
     });
-  })
-);
+  });
 
-router.get(
-  "/positions",
-  query(schemas.portfolioQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/positions", { preHandler: [query(schemas.portfolioQuery)] }, async (req, reply) => {
     const { portfolioId, asOf, includeAccrued } = req.valid.query;
     const ctx = await loadValuation({ portfolioId, asOf, includeAccrued });
     // Le posizioni chiuse restano visibili (portano il realizzato) ma vanno in
@@ -218,19 +210,15 @@ router.get(
       const bv = b.marketValueBase ?? d(0);
       return bv.comparedTo(av);
     });
-    return res.json({
+    return reply.send({
       asOf: ctx.asOf,
       baseCcy: ctx.portfolio.baseCcy,
       items: rows.map(S.position),
       warnings: ctx.valued.warnings,
     });
-  })
-);
+  });
 
-router.get(
-  "/value-series",
-  query(schemas.seriesQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/value-series", { preHandler: [query(schemas.seriesQuery)] }, async (req, reply) => {
     const { portfolioId, asOf, range, granularity, includeAccrued } = req.valid.query;
     const portfolio = portfolioId
       ? await portfoliosRepo.byId(portfolioId)
@@ -240,7 +228,7 @@ router.get(
     const at = asOf || today();
     const earliest = await txRepo.earliestDate(portfolio.id);
     if (!earliest) {
-      return res.json({ points: [], meta: { granularity: "day", range, warnings: [] } });
+      return reply.send({ points: [], meta: { granularity: "day", range, warnings: [] } });
     }
 
     const { from, to } = cal.resolveRange(range, at, earliest);
@@ -275,7 +263,7 @@ router.get(
       includeAccrued: !!includeAccrued,
     });
 
-    return res.json({
+    return reply.send({
       points: series.points.map(S.seriesPoint),
       meta: {
         range,
@@ -289,19 +277,15 @@ router.get(
         warnings: series.warnings,
       },
     });
-  })
-);
+  });
 
-router.get(
-  "/allocation",
-  query(
+  app.get("/allocation", { preHandler: [query(
     schemas.portfolioQuery.extend({
       by: z
         .enum(["assetClass", "currency", "instrument", "issuer"])
         .default("assetClass"),
     })
-  ),
-  asyncHandler(async (req: Request, res: Response) => {
+  )] }, async (req, reply) => {
     const { portfolioId, asOf, by } = req.valid.query;
     const ctx = await loadValuation({ portfolioId, asOf });
 
@@ -331,26 +315,22 @@ router.get(
       groups = head;
     }
 
-    return res.json({
+    return reply.send({
       asOf: ctx.asOf,
       by,
       baseCcy: ctx.portfolio.baseCcy,
       items: groups.map(S.allocationGroup),
     });
-  })
-);
+  });
 
-router.get(
-  "/returns",
-  query(schemas.seriesQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/returns", { preHandler: [query(schemas.seriesQuery)] }, async (req, reply) => {
     const { portfolioId, asOf, range, granularity } = req.valid.query;
     const ctx = await loadValuation({ portfolioId, asOf });
     const { portfolio } = ctx;
 
     const earliest = await txRepo.earliestDate(portfolio.id);
     if (!earliest) {
-      return res.json({ twr: null, xirr: null, simple: null, byYear: [], flows: [] });
+      return reply.send({ twr: null, xirr: null, simple: null, byYear: [], flows: [] });
     }
 
     const { from, to } = cal.resolveRange(range, ctx.asOf, earliest);
@@ -379,7 +359,7 @@ router.get(
     const netInvested = returns.netInvestedSeries(ctx.built.flows, [ctx.asOf])[0].netInvested;
     const simple = returns.simpleReturn(ctx.valued.totals.totalValue, netInvested);
 
-    return res.json({
+    return reply.send({
       asOf: ctx.asOf,
       baseCcy: portfolio.baseCcy,
       twr: { total: twr.total, annualized: twr.annualized, days: twr.days, segments: twr.segments },
@@ -396,19 +376,15 @@ router.get(
       },
       warnings: series.warnings,
     });
-  })
-);
+  });
 
-router.get(
-  "/income",
-  query(
+  app.get("/income", { preHandler: [query(
     schemas.portfolioQuery.extend({
       from: dateString().optional(),
       to: dateString().optional(),
       groupBy: z.enum(["month", "instrument"]).default("month"),
     })
-  ),
-  asyncHandler(async (req: Request, res: Response) => {
+  )] }, async (req, reply) => {
     const { portfolioId, from, to, groupBy } = req.valid.query;
     const portfolio = portfolioId
       ? await portfoliosRepo.byId(portfolioId)
@@ -425,7 +401,7 @@ router.get(
       { gross: ZERO, taxes: ZERO, net: ZERO }
     );
 
-    return res.json({
+    return reply.send({
       groupBy,
       baseCcy: portfolio.baseCcy,
       items: rows.map((r) => ({
@@ -439,7 +415,7 @@ router.get(
       })),
       totals: { gross: S.m(totals.gross), taxes: S.m(totals.taxes), net: S.m(totals.net) },
     });
-  })
-);
+  });
+};
 
 export { router, loadValuation, today };

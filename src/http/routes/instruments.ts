@@ -1,17 +1,16 @@
-import express from "express";
 import logger from "../../logger";
 import * as instrumentsRepo from "../../repo/instruments";
 import * as pricesRepo from "../../repo/prices";
 import * as eventsRepo from "../../repo/events";
 import * as bonds from "../../domain/bonds";
 import { money } from "../../domain/money";
-import { asyncHandler, notFound, conflict, validation } from "../errors";
+import { notFound, conflict, validation } from "../errors";
 import { z, body, query, params, parse, idParam, dateString } from "../validate";
 import * as schemas from "../schemas";
 import { errCode, errMessage } from "../../util/err";
 import { enqueueBackfill } from "../../market/refresher";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 /** Il rateo obbligazionario e lo scadenzario sono utili nella risposta, non solo in UI. */
 function withBondDetails(inst) {
@@ -79,13 +78,11 @@ async function regenerateProjected(inst) {
   }
 }
 
-router.get(
-  "/",
-  query(schemas.listInstrumentsQuery),
-  asyncHandler(async (req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/", { preHandler: [query(schemas.listInstrumentsQuery)] }, async (req, reply) => {
     const list = await instrumentsRepo.list(req.valid.query);
     const quotes = await pricesRepo.latestQuotes(list.map((i) => i.id));
-    return res.json({
+    return reply.send({
       items: list.map((i) => {
         const q = quotes.get(i.id);
         return {
@@ -103,13 +100,9 @@ router.get(
         };
       }),
     });
-  })
-);
+  });
 
-router.post(
-  "/",
-  body(schemas.createInstrument),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/", { preHandler: [body(schemas.createInstrument)] }, async (req, reply) => {
     const input = req.valid.body;
 
     // Un duplicato è un conflitto, non un errore interno: il messaggio dice quale
@@ -136,14 +129,10 @@ router.post(
       if (errCode(err) !== "MODULE_NOT_FOUND") throw err;
     }
 
-    return res.status(201).json(withBondDetails(created));
-  })
-);
+    return reply.code(201).send(withBondDetails(created));
+  });
 
-router.get(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const inst = await instrumentsRepo.byId(req.valid.params.id);
     if (!inst) throw notFound("strumento non trovato");
 
@@ -175,15 +164,10 @@ router.get(
       }
     }
 
-    return res.json(out);
-  })
-);
+    return reply.send(out);
+  });
 
-router.patch(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  body(schemas.updateInstrument),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.patch("/:id", { preHandler: [params(z.object({ id: idParam() })), body(schemas.updateInstrument)] }, async (req, reply) => {
     const id = req.valid.params.id;
     const existing = await instrumentsRepo.byId(id);
     if (!existing) throw notFound("strumento non trovato");
@@ -203,14 +187,10 @@ router.patch(
       await regenerateProjected(updated);
     }
 
-    return res.json(withBondDetails(updated));
-  })
-);
+    return reply.send(withBondDetails(updated));
+  });
 
-router.delete(
-  "/:id",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.delete("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const id = req.valid.params.id;
     const inst = await instrumentsRepo.byId(id);
     if (!inst) throw notFound("strumento non trovato");
@@ -226,33 +206,21 @@ router.delete(
     }
 
     await instrumentsRepo.remove(id);
-    return res.status(204).end();
-  })
-);
+    return reply.code(204).send();
+  });
 
-router.get(
-  "/:id/prices",
-  params(z.object({ id: idParam() })),
-  query(z.object({ from: dateString().optional(), to: dateString().optional() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.get("/:id/prices", { preHandler: [params(z.object({ id: idParam() })), query(z.object({ from: dateString().optional(), to: dateString().optional() }))] }, async (req, reply) => {
     const inst = await instrumentsRepo.byId(req.valid.params.id);
     if (!inst) throw notFound("strumento non trovato");
     const series = await pricesRepo.series(inst.id, req.valid.query);
-    return res.json({
+    return reply.send({
       items: series.map((p) => ({ date: p.date, close: p.close, source: p.source })),
       currency: inst.currency,
       quoteConvention: inst.quoteConvention,
     });
-  })
-);
+  });
 
-// Prezzo manuale. È IL PERCORSO PRINCIPALE PER LE OBBLIGAZIONI, non un fallback:
-// la copertura Yahoo sui BTP è zero.
-router.put(
-  "/:id/prices",
-  params(z.object({ id: idParam() })),
-  body(schemas.manualPriceBody),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.put("/:id/prices", { preHandler: [params(z.object({ id: idParam() })), body(schemas.manualPriceBody)] }, async (req, reply) => {
     const inst = await instrumentsRepo.byId(req.valid.params.id);
     if (!inst) throw notFound("strumento non trovato");
     const { date, close } = req.valid.body;
@@ -271,14 +239,10 @@ router.put(
       });
     }
 
-    return res.json({ date: saved.date, close: saved.close, source: saved.source });
-  })
-);
+    return reply.send({ date: saved.date, close: saved.close, source: saved.source });
+  });
 
-router.post(
-  "/:id/refresh",
-  params(z.object({ id: idParam() })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/:id/refresh", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
     const inst = await instrumentsRepo.byId(req.valid.params.id);
     if (!inst) throw notFound("strumento non trovato");
     if (inst.priceSource === "manual") {
@@ -292,8 +256,11 @@ router.post(
     } catch (err) {
       if (errCode(err) !== "MODULE_NOT_FOUND") throw err;
     }
-    return res.status(202).json({ accepted: true, jobId });
-  })
-);
+    return reply.code(202).send({ accepted: true, jobId });
+  });
+};
+
+// Prezzo manuale. È IL PERCORSO PRINCIPALE PER LE OBBLIGAZIONI, non un fallback:
+// la copertura Yahoo sui BTP è zero.
 
 export { router, regenerateProjected, withBondDetails };

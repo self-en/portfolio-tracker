@@ -1,14 +1,13 @@
-import express from "express";
 import logger from "../../logger";
 import config from "../../config";
 import * as fxRepo from "../../repo/fx";
 import * as refresher from "../../market/refresher";
 import { createProvider } from "../../market/provider";
-import { asyncHandler, err } from "../errors";
+import { err } from "../errors";
 import { z, query, body, dateString } from "../validate";
 import { createLimiter } from "../rateLimit";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 /**
  * LRU in memoria per /market/search: 200 voci, 10 minuti.
@@ -43,21 +42,19 @@ function cacheSet(key, value) {
   }
 }
 
-router.get(
-  "/search",
-  query(z.object({ q: z.string().trim().min(2, "servono almeno 2 caratteri").max(80) })),
-  asyncHandler(async (req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/search", { preHandler: [query(z.object({ q: z.string().trim().min(2, "servono almeno 2 caratteri").max(80) }))] }, async (req, reply) => {
     const q = req.valid.query.q;
     const key = q.toUpperCase();
 
     const cached = cacheGet(key);
-    if (cached) return res.json({ items: cached, cached: true });
+    if (cached) return reply.send({ items: cached, cached: true });
 
     try {
       const provider = createProvider();
       const items = await provider.resolveSymbol(q);
       cacheSet(key, items);
-      return res.json({ items, cached: false });
+      return reply.send({ items, cached: false });
     } catch (e) {
       // Il provider giù non è un 500: è un upstream che non risponde, e la UI deve
       // poter dire "cerca non disponibile, inserisci il ticker a mano".
@@ -66,26 +63,15 @@ router.get(
         hint: "puoi inserire ticker e ISIN manualmente",
       });
     }
-  })
-);
+  });
 
-// 1 richiesta al minuto: è un'azione esplicita, non un polling.
-const refreshLimiter = createLimiter({ windowMs: 60_000, max: 1, name: "market-refresh" });
-
-router.post(
-  "/refresh",
-  refreshLimiter.middleware,
-  body(z.object({ scope: z.enum(["quotes", "history", "fx", "events", "all"]).default("quotes") })),
-  asyncHandler(async (req: Request, res: Response) => {
+  app.post("/refresh", { preHandler: [refreshLimiter.hook, body(z.object({ scope: z.enum(["quotes", "history", "fx", "events", "all"]).default("quotes") }))] }, async (req, reply) => {
     const jobId = refresher.enqueueScope(req.valid.body.scope);
     // 202: accodato, non eseguito. La UI mostra lo stato via /api/system/status.
-    return res.status(202).json({ accepted: true, jobId, scope: req.valid.body.scope });
-  })
-);
+    return reply.code(202).send({ accepted: true, jobId, scope: req.valid.body.scope });
+  });
 
-router.get(
-  "/fx",
-  query(
+  app.get("/fx", { preHandler: [query(
     z.object({
       quotes: z
         .string()
@@ -95,11 +81,10 @@ router.get(
       from: dateString().optional(),
       to: dateString().optional(),
     })
-  ),
-  asyncHandler(async (req: Request, res: Response) => {
+  )] }, async (req, reply) => {
     const { quotes, date, from, to } = req.valid.query;
     const items = await fxRepo.list({ quotes, date, from, to });
-    return res.json({
+    return reply.send({
       base: "EUR",
       // La convenzione va DICHIARATA nella risposta: è la fonte di errore numero uno
       // in un'app multivaluta.
@@ -107,14 +92,14 @@ router.get(
       items,
       coverage: await fxRepo.coverage(),
     });
-  })
-);
+  });
 
-router.get(
-  "/status",
-  asyncHandler(async (_req: Request, res: Response) => {
-    return res.json({ provider: config.market.provider, refresher: refresher.status() });
-  })
-);
+  app.get("/status", async (_req, reply) => {
+    return reply.send({ provider: config.market.provider, refresher: refresher.status() });
+  });
+};
+
+// 1 richiesta al minuto: è un'azione esplicita, non un polling.
+const refreshLimiter = createLimiter({ windowMs: 60_000, max: 1, name: "market-refresh" });
 
 export { router, searchCache as _searchCache };

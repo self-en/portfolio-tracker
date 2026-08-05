@@ -1,8 +1,7 @@
-import express from "express";
 import config from "../../config";
 import logger from "../../logger";
 import { z, body, parse } from "../validate";
-import { asyncHandler, unauthorized } from "../errors";
+import { unauthorized } from "../errors";
 import {
   verifyPassword,
   signToken,
@@ -11,8 +10,8 @@ import {
   clearSessionCookie,
 } from "../auth";
 import { createLimiter } from "../rateLimit";
+import type { FastifyPluginAsync } from "fastify";
 
-const router = express.Router();
 
 // 10 tentativi / 15 minuti per IP. Ogni fallimento è loggato a warn con l'IP.
 const loginLimiter = createLimiter({
@@ -23,11 +22,8 @@ const loginLimiter = createLimiter({
 
 const loginSchema = z.object({ password: z.string().min(1, "password obbligatoria") });
 
-router.post(
-  "/login",
-  loginLimiter.middleware,
-  body(loginSchema),
-  asyncHandler(async (req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.post("/login", { preHandler: [loginLimiter.hook, body(loginSchema)] }, async (req, reply) => {
     const { password } = req.valid.body;
 
     if (!verifyPassword(password, config.auth)) {
@@ -42,29 +38,30 @@ router.post(
       secret: config.auth.sessionSecret,
       ttlDays: config.auth.sessionTtlDays,
     });
-    setSessionCookie(res, token);
+    setSessionCookie(reply, token);
     logger.info("[auth] login riuscito");
-    return res.status(204).end();
-  })
-);
+    return reply.code(204).send();
+  });
 
-router.post("/logout", (_req: Request, res: Response) => {
-  clearSessionCookie(res);
-  return res.status(204).end();
-});
+  app.post("/logout", async (_req, reply) => {
+    clearSessionCookie(reply);
+    return reply.code(204).send();
+  });
 
-// Non autenticata di proposito: è il modo in cui la SPA scopre se ha una sessione
-// senza incassare un 401 e finire nel redirect globale a /login.
-router.get("/me", (req: Request, res: Response) => {
+  app.get("/me", (req, reply) => {
   const token = req.cookies?.[config.auth.cookieName];
   const result = verifyToken(token, { secret: config.auth.sessionSecret });
   if (!result.ok) {
-    return res.json({ authenticated: false, reason: result.reason });
+    return reply.send({ authenticated: false, reason: result.reason });
   }
-  return res.json({
+  return reply.send({
     authenticated: true,
     expiresAt: new Date(result.payload.exp * 1000).toISOString(),
   });
 });
+};
+
+// Non autenticata di proposito: è il modo in cui la SPA scopre se ha una sessione
+// senza incassare un 401 e finire nel redirect globale a /login.
 
 export { router, loginSchema, parse };

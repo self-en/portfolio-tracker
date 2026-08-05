@@ -7,14 +7,15 @@
 // float entra in un sistema decimale.
 import { z } from "zod";
 import { validation } from "./errors";
-import type { NextFunction, Request, Response } from "express";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import type { ZodType } from "zod";
 
 const DECIMAL_RE = /^-?\d{1,20}(\.\d{1,12})?$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CCY_RE = /^[A-Z]{3}$/;
 
 /** Stringa decimale. Accetta anche un number in input (lo stringifica) per tolleranza verso i client. */
-const decimalString = (opts = {}) => {
+const decimalString = (opts: { positive?: boolean; nonNegative?: boolean } = {}) => {
   let s = z
     .union([z.string(), z.number()])
     .transform((v) => (typeof v === "number" ? String(v) : v.trim()))
@@ -30,7 +31,7 @@ const dateString = () =>
     .string()
     .regex(DATE_RE, "la data deve essere in formato YYYY-MM-DD")
     .refine((v) => {
-      const [y, m, d] = v.split("-").map(Number);
+      const [y, m, d] = v.split("-").map(Number) as [number, number, number];
       const dt = new Date(Date.UTC(y, m - 1, d));
       return (
         dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
@@ -49,7 +50,7 @@ const idParam = () => z.coerce.number().int().positive();
  * Valida `data` con `schema`, oppure lancia un ApiError validation_error che
  * porta l'elenco dei campi in `details`.
  */
-function parse(schema, data, what = "richiesta") {
+function parse<T>(schema: ZodType<T>, data: unknown, what = "richiesta"): T {
   const result = schema.safeParse(data);
   if (result.success) return result.data;
   const details = result.error.issues.map((i) => ({
@@ -61,31 +62,22 @@ function parse(schema, data, what = "richiesta") {
 }
 
 /** Helper per i middleware: valida body / query / params e sostituisce il valore parsato. */
-const body = (schema) => (req: Request, _res: Response, next: NextFunction) => {
-  try {
+const body =
+  <T,>(schema: ZodType<T>) =>
+  async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     req.valid = { ...(req.valid || {}), body: parse(schema, req.body, "body") };
-    next();
-  } catch (e) {
-    next(e);
-  }
-};
+  };
 
-const query = (schema) => (req: Request, _res: Response, next: NextFunction) => {
-  try {
+const query =
+  <T,>(schema: ZodType<T>) =>
+  async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     req.valid = { ...(req.valid || {}), query: parse(schema, req.query, "query string") };
-    next();
-  } catch (e) {
-    next(e);
-  }
-};
+  };
 
-const params = (schema) => (req: Request, _res: Response, next: NextFunction) => {
-  try {
+const params =
+  <T,>(schema: ZodType<T>) =>
+  async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     req.valid = { ...(req.valid || {}), params: parse(schema, req.params, "parametri di percorso") };
-    next();
-  } catch (e) {
-    next(e);
-  }
-};
+  };
 
 export { z, parse, body, query, params, decimalString, dateString, currency, idParam, DECIMAL_RE, DATE_RE };

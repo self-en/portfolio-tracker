@@ -1,19 +1,17 @@
-import express from "express";
 import config from "../../config";
 import { state } from "../../boot";
 import { knownVersions } from "../../db/migrate";
-import { asyncHandler } from "../errors";
-import * as refreshLog from "../../repo/refreshLog";
 
-const router = express.Router();
+import * as refreshLog from "../../repo/refreshLog";
+import type { FastifyPluginAsync } from "fastify";
+
 
 // Diagnostica. Autenticata (monta sotto requireAuth) tranne per la parte che
 // serve alla schermata di configurazione: quando l'app è in locked mode il gate
 // 503 scatta prima, quindi questo endpoint è raggiungibile solo quando la config
 // è a posto — la SPA legge lo stato di lock dal codice d'errore 503.
-router.get(
-  "/status",
-  asyncHandler(async (_req: Request, res: Response) => {
+const router: FastifyPluginAsync = async (app) => {
+  app.get("/status", async (_req, reply) => {
     const warnings = [];
     if (config.locked) warnings.push({ code: "not_configured", details: config.lockedReasons });
     if (state.migrations.mismatched.length) {
@@ -33,7 +31,7 @@ router.get(
       }
     }
 
-    return res.json({
+    return reply.send({
       ready: state.ready,
       startedAt: state.startedAt,
       db: {
@@ -64,7 +62,7 @@ router.get(
       },
       warnings,
     });
-  })
-);
+  });
+};
 
 export { router };
