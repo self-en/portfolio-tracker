@@ -2,3 +2,11 @@ node_modules/
 npm-debug.log*
 .env
 .DS_Store
+
+# Output di `tsc -p tsconfig.json`. NON va versionato: lo ricostruisce sia lo
+# stage 2b del Dockerfile (`COPY src/` + `npm run build`) sia la CI, quindi la
+# copia committata non veniva usata da nessuno — restava solo a sporcare ogni
+# diff e a divergere dai sorgenti. `web/dist` era già ignorato da web/.gitignore:
+# mancava solo questa riga, ed è per questo che di artefatti se n'è versionato uno
+# solo.
+build/
