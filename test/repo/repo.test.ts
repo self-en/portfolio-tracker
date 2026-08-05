@@ -624,6 +624,43 @@ test("strumenti: transactionCount alimenta il 409 su DELETE", async () => {
   assert.equal(await instrumentsRepo.transactionCount(i.id), 1);
 });
 
+test("portafogli: create → update → remove round-trip", async () => {
+  await freshDb();
+  const created = must(await portfoliosRepo.create({ name: "Secondario", baseCcy: "USD" }), "il portafoglio creato");
+  assert.equal(created.name, "Secondario");
+  assert.equal(created.baseCcy, "USD");
+
+  const updated = must(await portfoliosRepo.update(created.id, { broker: "Fineco" }), "il portafoglio aggiornato");
+  assert.equal(updated.broker, "Fineco");
+  // Un update parziale non deve toccare i campi non passati.
+  assert.equal(updated.name, "Secondario");
+
+  assert.equal(await portfoliosRepo.remove(created.id), true);
+  assert.equal(await portfoliosRepo.byId(created.id), null);
+  assert.equal(await portfoliosRepo.remove(created.id), false, "una seconda delete è false, non un errore");
+});
+
+test("portafogli: transactionCount alimenta il 409 su DELETE", async () => {
+  await freshDb();
+  const pf = must(await portfoliosRepo.first(), "il portafoglio");
+  const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");
+  assert.equal(await portfoliosRepo.transactionCount(pf.id), 0);
+  await txRepo.create({
+    portfolioId: pf.id,
+    instrumentId: i.id,
+    type: "BUY",
+    tradeDate: "2026-01-10",
+    quantity: "1",
+    price: "10",
+    netAmount: "-10",
+    tradeCcy: "EUR",
+    fees: "0",
+    taxes: "0",
+    accruedInterest: "0",
+  });
+  assert.equal(await portfoliosRepo.transactionCount(pf.id), 1);
+});
+
 test("strumenti: priceCoverage riporta il range effettivo", async () => {
   await freshDb();
   const i = must(await instrumentsRepo.create(EQ), "lo strumento creato");

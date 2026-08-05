@@ -12,6 +12,7 @@ import Movements from "./pages/Movements";
 import Calendar from "./pages/Calendar";
 import Instruments from "./pages/Instruments";
 import InstrumentDetail from "./pages/InstrumentDetail";
+import Portfolios from "./pages/Portfolios";
 import type { PortfoliosResponse } from "./types";
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/movimenti", label: "Movimenti" },
   { to: "/calendario", label: "Calendario" },
   { to: "/strumenti", label: "Strumenti" },
+  { to: "/portafogli", label: "Portafogli" },
 ];
 
 function PortfolioSelect() {
@@ -144,6 +146,7 @@ export const router = createBrowserRouter([
       { path: "/calendario", element: <Calendar /> },
       { path: "/strumenti", element: <Instruments /> },
       { path: "/strumenti/:id", element: <InstrumentDetail /> },
+      { path: "/portafogli", element: <Portfolios /> },
       { path: "*", element: <NotFound /> },
     ],
   },

@@ -239,6 +239,7 @@ Errori: `{ error: { code, message, details? } }` con codici
 | system       | `GET /healthz` (non autenticato) · `GET /api/system/status`                                    |
 | strumenti    | `GET POST /instruments` · `GET PATCH DELETE /instruments/:id` · `GET PUT /instruments/:id/prices` · `POST /instruments/:id/refresh` |
 | movimenti    | `GET POST /transactions` · `GET PATCH DELETE /transactions/:id` · **`POST /transactions/preview`** |
+| portafogli   | `GET POST /portfolios` · `PATCH DELETE /portfolios/:id`                                       |
 | portafoglio  | `/portfolio/summary` · `/positions` · `/value-series` · `/allocation` · `/returns` · `/income` |
 | calendario   | `GET /calendar` · **`POST /calendar/:id/confirm`** · `DELETE /calendar/:id`                    |
 | mercato      | `GET /market/search` · `POST /market/refresh` · `GET /market/fx` · `GET /market/status`        |
