@@ -10,8 +10,11 @@ import EmptyState from "../components/EmptyState";
 import InstrumentForm from "../components/InstrumentForm";
 import StaleBadge from "../components/StaleBadge";
 import { useToast } from "../components/Toast";
+import { ApiError } from "../api";
+import type { Column } from "../components/DataTable";
+import type { Instrument, InstrumentsResponse } from "../types";
 
-const ASSET_CLASS_LABELS = {
+const ASSET_CLASS_LABELS: Record<string, string> = {
   EQUITY: "Azione",
   ETF: "ETF",
   BOND: "Obbligazione",
@@ -20,7 +23,10 @@ const ASSET_CLASS_LABELS = {
   CASH: "Liquidità",
 };
 
-const PRICE_SOURCE_LABELS = { yahoo: "Provider", manual: "Manuale" };
+const PRICE_SOURCE_LABELS: Record<string, string> = { yahoo: "Provider", manual: "Manuale" };
+
+/** Cosa sta facendo il drawer: creare uno strumento, o modificarne uno esistente. */
+type DrawerState = { mode: "create" } | { mode: "edit"; instrument: Instrument };
 
 export default function Instruments() {
   const queryClient = useQueryClient();
@@ -29,9 +35,11 @@ export default function Instruments() {
   const [q, setQ] = useState("");
   const [assetClass, setAssetClass] = useState("");
   const [onlyActive, setOnlyActive] = useState(true);
-  const [drawer, setDrawer] = useState(null); // null | {mode:'create'} | {mode:'edit', instrument}
-  const [pendingDelete, setPendingDelete] = useState(null);
-  const [deleteError, setDeleteError] = useState(null);
+  const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Instrument | null>(null);
+  // L'errore di cancellazione è tipizzato ApiError perché il caso che conta è il
+  // 409 "ha movimenti collegati", che apre l'alternativa "disattiva invece".
+  const [deleteError, setDeleteError] = useState<ApiError | null>(null);
 
   const params = useMemo(
     () => ({
@@ -44,7 +52,7 @@ export default function Instruments() {
 
   const list = useQuery({
     queryKey: ["instruments", "list", params],
-    queryFn: ({ signal }) => get("/instruments", { query: params, signal }),
+    queryFn: ({ signal }) => get<InstrumentsResponse>("/instruments", { query: params, signal }),
   });
 
   const invalidate = () => {
@@ -52,7 +60,7 @@ export default function Instruments() {
     queryClient.invalidateQueries({ queryKey: ["portfolio"] });
   };
 
-  const remove = useMutation({
+  const remove = useMutation<unknown, ApiError, number>({
     mutationFn: (id) => del(`/instruments/${id}`),
     onSuccess: () => {
       invalidate();
@@ -65,7 +73,7 @@ export default function Instruments() {
     onError: (err) => setDeleteError(err),
   });
 
-  const deactivate = useMutation({
+  const deactivate = useMutation<unknown, ApiError, Instrument>({
     mutationFn: (instrument) =>
       patch(`/instruments/${instrument.id}`, {
         active: false,
@@ -85,7 +93,7 @@ export default function Instruments() {
     onError: (err) => setDeleteError(err),
   });
 
-  const columns = useMemo(
+  const columns = useMemo<Array<Column<Instrument>>>(
     () => [
       {
         key: "name",
@@ -107,7 +115,7 @@ export default function Instruments() {
       {
         key: "assetClass",
         header: "Classe",
-        render: (i) => ASSET_CLASS_LABELS[i.assetClass] || i.assetClass,
+        render: (i) => (i.assetClass && ASSET_CLASS_LABELS[i.assetClass]) || i.assetClass,
       },
       { key: "currency", header: "Valuta", hideOnNarrow: true, render: (i) => i.currency },
       {
@@ -116,7 +124,7 @@ export default function Instruments() {
         hideOnNarrow: true,
         render: (i) => (
           <span>
-            {PRICE_SOURCE_LABELS[i.priceSource] || i.priceSource}
+            {(i.priceSource && PRICE_SOURCE_LABELS[i.priceSource]) || i.priceSource}
             {i.quoteConvention === "PCT_OF_NOMINAL" ? (
               <span className="muted small"> · % nominale</span>
             ) : null}
@@ -291,14 +299,14 @@ export default function Instruments() {
             <button
               type="button"
               className="btn"
-              onClick={() => deactivate.mutate(pendingDelete)}
+              onClick={() => pendingDelete && deactivate.mutate(pendingDelete)}
               disabled={deactivate.isPending}
             >
               Disattiva invece
             </button>
           ) : null
         }
-        onConfirm={() => remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
         onCancel={() => {
           setPendingDelete(null);
           setDeleteError(null);

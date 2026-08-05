@@ -1,9 +1,18 @@
 import { money, monthLabel, num } from "../format";
+import type { Amount } from "../types";
+
+/** Un mese della striscia: chiave "YYYY-MM", quanti eventi e il lordo. */
+export interface MonthSummary {
+  key: string;
+  count: number;
+  gross: Amount;
+}
 
 interface MonthGridProps {
-  months?: any;
+  months?: MonthSummary[];
   baseCcy?: string;
-  currentKey?: any;
+  /** Mese corrente, evidenziato. */
+  currentKey?: string | null;
 }
 
 
@@ -15,12 +24,6 @@ interface MonthGridProps {
 // forma sbagliata (la domanda "è davvero un grafico?" manda questo caso su una
 // lista). Il chip porta testo, il grafico a colonne accanto porta il confronto.
 
-/**
- * @param {object} props
- * @param {Array<{key: string, count: number, gross: string|null}>} props.months
- * @param {string} props.baseCcy
- * @param {string} [props.currentKey] mese corrente, evidenziato
- */
 export default function MonthGrid({ months, baseCcy = "EUR", currentKey }: MonthGridProps) {
   if (!months || months.length === 0) return null;
 

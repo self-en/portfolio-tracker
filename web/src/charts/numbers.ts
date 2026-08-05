@@ -9,6 +9,9 @@
 // l'utente legge (assi esclusi, che sono etichette di scala) viene formattato
 // dalla stringa originale, mai dal float.
 
+/** Ciò che entra in questo confine: un importo dall'API, o un numero già tale. */
+export type Convertible = string | number | null | undefined;
+
 /**
  * Stringa decimale → numero, oppure null.
  *
@@ -16,28 +19,28 @@
  * crollo del portafoglio, ed è la peggior modalità di fallimento dell'app (§5).
  * recharts interrompe la linea sui null, che è esattamente ciò che serve.
  */
-export function toNumber(value) {
+export function toNumber(value: Convertible): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
 /** Come toNumber ma con 0 al posto di null: per le altezze delle colonne in stack. */
-export function toNumberOrZero(value) {
+export function toNumberOrZero(value: Convertible): number {
   const n = toNumber(value);
   return n === null ? 0 : n;
 }
 
 /** true se il valore decimale è diverso da zero (senza passare da un confronto su stringa). */
-export function isPositive(value) {
+export function isPositive(value: Convertible): boolean {
   const n = toNumber(value);
   return n !== null && n > 0;
 }
 
 /** Estremi di una lista di numeri, ignorando i null. */
-export function extent(values) {
-  let min = null;
-  let max = null;
+export function extent(values: Array<number | null>): { min: number | null; max: number | null } {
+  let min: number | null = null;
+  let max: number | null = null;
   for (const v of values) {
     if (v === null) continue;
     if (min === null || v < min) min = v;
@@ -47,6 +50,6 @@ export function extent(values) {
 }
 
 /** Clamp, per non far uscire un raggio d'angolo dalla sua colonna. */
-export function clamp(value, lo, hi) {
+export function clamp(value: number, lo: number, hi: number): number {
   return value < lo ? lo : value > hi ? hi : value;
 }

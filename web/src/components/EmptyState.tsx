@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 
 interface EmptyStateProps {
-  title: string;
-  message?: any;
-  action?: any;
+  /** Opzionale: chi ha già un <h1> sopra passa solo il messaggio. */
+  title?: ReactNode;
+  message?: ReactNode;
+  action?: ReactNode;
   children?: ReactNode;
 }
 

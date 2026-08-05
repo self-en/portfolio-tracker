@@ -11,13 +11,15 @@ import Spinner from "../components/Spinner";
 import WarningsBanner from "../components/WarningsBanner";
 import IncomeByMonthChart from "../charts/IncomeByMonthChart";
 import "../charts/charts.css";
+import type { CalendarEvent, CalendarResponse } from "../types";
+import type { MonthSummary } from "../components/MonthGrid";
 
 // Aritmetica sulle date su stringhe "YYYY-MM-DD" con Date.UTC, mai su un Date in
 // fuso locale: così il DST si aggira invece di testarci intorno
 // (docs/decisions.md §6).
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-function shiftMonths(iso, months) {
+function shiftMonths(iso: string, months: number): string {
   const from = new Date(`${iso}T00:00:00Z`);
   const target = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + months, 1));
   const lastDay = new Date(
@@ -44,14 +46,14 @@ export default function Calendar() {
   const { portfolioId } = useApp();
   const ranges = useMemo(windows, []);
   const [windowId, setWindowId] = useState("default");
-  const [confirming, setConfirming] = useState(null);
+  const [confirming, setConfirming] = useState<CalendarEvent | null>(null);
 
   const active = ranges.find((r) => r.id === windowId) || ranges[0];
 
   const query = useQuery({
     queryKey: ["calendar", portfolioId, active.from ?? null, active.to ?? null],
     queryFn: () =>
-      get("/calendar", {
+      get<CalendarResponse>("/calendar", {
         query: { portfolioId: portfolioId || undefined, from: active.from, to: active.to },
       }),
   });
@@ -60,13 +62,13 @@ export default function Calendar() {
   const monthlyTotals = query.data?.monthlyTotals ?? [];
   const baseCcy = query.data?.baseCcy || "EUR";
 
-  const months = useMemo(() => {
-    const counts = new Map();
+  const months = useMemo<MonthSummary[]>(() => {
+    const counts = new Map<string, number>();
     for (const ev of events) {
       const key = String(ev.payDate).slice(0, 7);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    const grossByMonth = new Map(monthlyTotals.map((t) => [t.month, t.gross]));
+    const grossByMonth = new Map(monthlyTotals.map((t) => [t.month, t.gross] as const));
     return [...counts.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
       .map(([key, count]) => ({ key, count, gross: grossByMonth.get(key) ?? null }));

@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { post } from "../api";
+import { ApiError } from "../api";
 import { AUTH_QUERY_KEY, NotConfigured, useAuth } from "../auth";
 import Spinner from "../components/Spinner";
+import type { FormEvent } from "react";
 
 export default function Login() {
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [retryIn, setRetryIn] = useState(0);
 
@@ -39,7 +41,7 @@ export default function Login() {
 
   const blocked = pending || retryIn > 0;
 
-  async function onSubmit(event) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (blocked) return;
     setMessage(null);
@@ -54,13 +56,15 @@ export default function Login() {
       await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
       navigate(from, { replace: true });
     } catch (err) {
-      if (err.status === 429) {
+      // Lo status e il Retry-After li porta ApiError: qualunque altra cosa
+      // arrivi qui vale solo per il suo messaggio.
+      if (err instanceof ApiError && err.status === 429) {
         setRetryIn(err.retryAfterSec ?? 60);
         setMessage("Troppi tentativi di accesso.");
-      } else if (err.status === 401) {
+      } else if (err instanceof ApiError && err.status === 401) {
         setMessage("Password non corretta.");
       } else {
-        setMessage(err.message);
+        setMessage(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setPending(false);

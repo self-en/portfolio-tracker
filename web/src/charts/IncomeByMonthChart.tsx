@@ -2,16 +2,30 @@ import { useId, useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { money, monthLabel, num } from "../format";
 import ChartFrame from "./ChartFrame";
-import ChartTooltip from "./ChartTooltip";
+import ChartTooltip, { pointOf } from "./ChartTooltip";
 import ColumnShape from "./ColumnShape";
 import useChartTheme from "./useChartTheme";
 import { hatch45 } from "./chartTheme";
 import { toNumberOrZero } from "./numbers";
+import type { TooltipRenderProps, TooltipRow } from "./ChartTooltip";
+import type { LegendItems } from "./ChartLegend";
+import type { MonthlyIncomeTotal } from "../types";
 
 interface IncomeByMonthChartProps {
-  items?: any;
+  items?: MonthlyIncomeTotal[];
   baseCcy?: string;
   refetching?: boolean;
+}
+
+/**
+ * Una colonna: i due valori in float per l'altezza dello stack, e `raw` con le
+ * stringhe originali - il tooltip e la tabella formattano quelle, mai il float.
+ */
+interface IncomeColumn {
+  month: string;
+  confirmedValue: number;
+  projectedValue: number;
+  raw: MonthlyIncomeTotal;
 }
 
 
@@ -28,14 +42,14 @@ interface IncomeByMonthChartProps {
 // È esattamente il caso motivato dall'accessibilità per cui la texture è
 // riservata, e la legenda la spiega a parole.
 
-const safe = (raw) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
+const safe = (raw: string) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
 
 export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching = false }: IncomeByMonthChartProps) {
   const theme = useChartTheme();
   const hatchId = `${safe(useId())}-income-projected`;
   const hatch = hatch45(hatchId, theme.sequential);
 
-  const data = useMemo(
+  const data = useMemo<IncomeColumn[]>(
     () =>
       (items || []).map((it) => ({
         month: it.month,
@@ -49,26 +63,25 @@ export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching 
   const hasProjected = data.some((d) => d.projectedValue > 0);
   const hasConfirmed = data.some((d) => d.confirmedValue > 0);
 
-  const legend = [
+  const legend: LegendItems = [
     hasConfirmed && {
       label: "Incassato",
       color: theme.sequential,
-      mark: "rect",
+      mark: "rect" as const,
       note: "c'è un movimento registrato",
     },
     hasProjected && {
       label: "Proiettato",
       color: theme.sequential,
-      mark: "texture",
+      mark: "texture" as const,
       note: "righe a 45°: stessa tinta, dato non ancora confermato",
     },
-  ].filter(Boolean);
+  ];
 
-  const tooltip = ({ active, payload }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const point = payload[0]?.payload;
+  const tooltip = (props: TooltipRenderProps) => {
+    const point = pointOf<IncomeColumn>(props);
     if (!point) return null;
-    const rows = [];
+    const rows: TooltipRow[] = [];
     if (point.confirmedValue > 0) {
       rows.push({
         label: "Incassato",

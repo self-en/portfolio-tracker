@@ -12,8 +12,11 @@ import Spinner from "../components/Spinner";
 import StaleBadge from "../components/StaleBadge";
 import WarningsBanner from "../components/WarningsBanner";
 import { useToast } from "../components/Toast";
+import type { ReactNode } from "react";
+import type { Column } from "../components/DataTable";
+import type { CouponScheduleEntry, Instrument, PriceCoverage } from "../types";
 
-const ASSET_CLASS_LABELS = {
+const ASSET_CLASS_LABELS: Record<string, string> = {
   EQUITY: "Azione",
   ETF: "ETF",
   BOND: "Obbligazione",
@@ -22,7 +25,8 @@ const ASSET_CLASS_LABELS = {
   CASH: "Liquidità",
 };
 
-const FREQUENCY_LABELS = {
+/** Cedole per anno → parola. La chiave è un numero, non una stringa. */
+const FREQUENCY_LABELS: Record<number, string> = {
   0: "zero coupon",
   1: "annuale",
   2: "semestrale",
@@ -30,7 +34,47 @@ const FREQUENCY_LABELS = {
   12: "mensile",
 };
 
-function Row({ label, children }) {
+// Fuori dal componente: non dipende da nessuno stato, e qui non ha bisogno di
+// una useMemo per non essere ricreato a ogni render.
+const SCHEDULE_COLUMNS: Array<Column<CouponScheduleEntry>> = [
+  {
+    key: "payDate",
+    header: "Pagamento",
+    render: (p) => <span className="num">{fmtDate(p.payDate)}</span>,
+  },
+  {
+    key: "period",
+    header: "Periodo di maturazione",
+    render: (p) => (
+      <span className="num">
+        {fmtDate(p.periodStart)} → {fmtDate(p.periodEnd)}
+      </span>
+    ),
+  },
+  {
+    key: "amountPer100",
+    header: "Importo per 100 di nominale",
+    align: "right",
+    render: (p) => <span className="num">{num(p.amountPer100, 5)}</span>,
+  },
+  {
+    key: "irregular",
+    header: "Note",
+    render: (p) =>
+      p.irregular ? (
+        <span
+          className="badge badge--stale"
+          title="Periodo di maturazione diverso dal periodo cedolare pieno: l'importo è proratato"
+        >
+          irregolare
+        </span>
+      ) : (
+        <span className="muted">{DASH}</span>
+      ),
+  },
+];
+
+function Row({ label, children }: { label: ReactNode; children?: ReactNode }) {
   return (
     <div className="detail-row">
       <dt>{label}</dt>
@@ -47,7 +91,7 @@ export default function InstrumentDetail() {
 
   const detail = useQuery({
     queryKey: ["instruments", "detail", id],
-    queryFn: ({ signal }) => get(`/instruments/${id}`, { signal }),
+    queryFn: ({ signal }) => get<Instrument>(`/instruments/${id}`, { signal }),
   });
 
   const refresh = useMutation({
@@ -90,7 +134,7 @@ export default function InstrumentDetail() {
   const isBond = inst.assetClass === "BOND";
   const isPctQuote = inst.quoteConvention === "PCT_OF_NOMINAL";
   const manual = inst.priceSource === "manual";
-  const coverage = inst.priceCoverage || {};
+  const coverage: Partial<PriceCoverage> = inst.priceCoverage || {};
   const schedule = inst.couponSchedule ?? [];
 
   return (
@@ -103,7 +147,7 @@ export default function InstrumentDetail() {
           </h1>
           <p className="muted small">
             {[
-              ASSET_CLASS_LABELS[inst.assetClass] || inst.assetClass,
+              (inst.assetClass && ASSET_CLASS_LABELS[inst.assetClass]) || inst.assetClass,
               inst.ticker,
               inst.isin,
               inst.exchange,
@@ -132,7 +176,7 @@ export default function InstrumentDetail() {
         <section className="card">
           <h2 className="card-title">Anagrafica</h2>
           <dl className="detail-list">
-            <Row label="Classe">{ASSET_CLASS_LABELS[inst.assetClass] || inst.assetClass}</Row>
+            <Row label="Classe">{(inst.assetClass && ASSET_CLASS_LABELS[inst.assetClass]) || inst.assetClass}</Row>
             <Row label="Ticker">{inst.ticker}</Row>
             <Row label="ISIN">{inst.isin}</Row>
             <Row label="Borsa">{inst.exchange}</Row>
@@ -252,43 +296,7 @@ export default function InstrumentDetail() {
           </p>
           <DataTable
             caption="Scadenzario cedolare"
-            columns={[
-              {
-                key: "payDate",
-                header: "Pagamento",
-                render: (p) => <span className="num">{fmtDate(p.payDate)}</span>,
-              },
-              {
-                key: "period",
-                header: "Periodo di maturazione",
-                render: (p) => (
-                  <span className="num">
-                    {fmtDate(p.periodStart)} → {fmtDate(p.periodEnd)}
-                  </span>
-                ),
-              },
-              {
-                key: "amountPer100",
-                header: "Importo per 100 di nominale",
-                align: "right",
-                render: (p) => <span className="num">{num(p.amountPer100, 5)}</span>,
-              },
-              {
-                key: "irregular",
-                header: "Note",
-                render: (p) =>
-                  p.irregular ? (
-                    <span
-                      className="badge badge--stale"
-                      title="Periodo di maturazione diverso dal periodo cedolare pieno: l'importo è proratato"
-                    >
-                      irregolare
-                    </span>
-                  ) : (
-                    <span className="muted">{DASH}</span>
-                  ),
-              },
-            ]}
+            columns={SCHEDULE_COLUMNS}
             rows={schedule}
             rowKey={(p) => p.payDate}
             empty={

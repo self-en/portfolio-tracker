@@ -30,8 +30,11 @@
 // avrebbero un cap di 3 slot — non ne usiamo.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Le due modalità: un secondo set di step SELEZIONATO, non un flip dei colori chiari. */
+export type ChartMode = "light" | "dark";
+
 /** Slot categorici, in ordine FISSO. Mai ciclati, mai generati. */
-export const CATEGORICAL = {
+export const CATEGORICAL: Record<ChartMode, string[]> = {
   light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
   dark: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
 };
@@ -39,7 +42,21 @@ export const CATEGORICAL = {
 /** Contrasto misurato sulla superficie chiara: sotto 3:1 serve il rimedio. */
 const LOW_CONTRAST_LIGHT = new Set(["#1baf7a", "#eda100", "#e87ba4"]);
 
-export const CHROME = {
+/** I token di cornice: superficie, testo, griglia, e i due toni con segno. */
+export interface ChartChrome {
+  surface: string;
+  plane: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  grid: string;
+  axis: string;
+  border: string;
+  positive: string;
+  negative: string;
+}
+
+export const CHROME: Record<ChartMode, ChartChrome> = {
   light: {
     surface: "#fcfcfb",
     plane: "#f9f9f7",
@@ -74,7 +91,12 @@ export const STATUS = {
   critical: "#d03b3b",
 };
 
-/** Specifiche delle marche, dalla skill. Numeri, non opinioni. */
+/**
+ * Specifiche delle marche, dalla skill. Numeri, non opinioni.
+ *
+ * `as const` perché `lineCap` finisce in `strokeLinecap`, che vuole il letterale
+ * "round" e non un `string` qualsiasi.
+ */
 export const MARKS = {
   lineWidth: 2,
   lineCap: "round",
@@ -83,9 +105,9 @@ export const MARKS = {
   barRadius: 4, // solo l'estremità dei dati, la base resta quadra
   segmentGap: 2, // gap di superficie tra segmenti adiacenti
   gridWidth: 1,
-};
+} as const;
 
-export function detectMode() {
+export function detectMode(): ChartMode {
   if (typeof document === "undefined") return "light";
   const explicit = document.documentElement.getAttribute("data-theme");
   if (explicit === "dark" || explicit === "light") return explicit;
@@ -95,12 +117,8 @@ export function detectMode() {
   return "light";
 }
 
-/**
- * Tema per la modalità corrente.
- *
- * @param {"light"|"dark"} [mode]
- */
-export function getChartTheme(mode = detectMode()) {
+/** Tema per la modalità corrente. */
+export function getChartTheme(mode: ChartMode = detectMode()) {
   const m = mode === "dark" ? "dark" : "light";
   const palette = CATEGORICAL[m];
   const chrome = CHROME[m];
@@ -119,7 +137,7 @@ export function getChartTheme(mode = detectMode()) {
      * bug del chiamante, e restituire il colore muted lo rende visibile invece di
      * nasconderlo dietro un ciclo.
      */
-    series(i) {
+    series(i: number): string {
       const idx = Number(i);
       if (!Number.isInteger(idx) || idx < 0 || idx >= palette.length) return chrome.textMuted;
       return palette[idx];
@@ -131,7 +149,7 @@ export function getChartTheme(mode = detectMode()) {
      * true se quel colore ha meno di 3:1 sulla superficie: il chiamante DEVE
      * fornire etichetta diretta o vista tabellare (regola di rimedio della skill).
      */
-    needsRelief(hex) {
+    needsRelief(hex: string): boolean {
       return m === "light" && LOW_CONTRAST_LIGHT.has(String(hex).toLowerCase());
     },
 
@@ -139,13 +157,21 @@ export function getChartTheme(mode = detectMode()) {
     sequential: m === "dark" ? "#3987e5" : "#2a78d6",
 
     /** Tono per un delta con segno. Il testo resta sempre in token di TESTO. */
-    tone(sign) {
+    tone(sign: number | null): string {
+      if (sign === null) return chrome.textMuted;
       if (sign > 0) return chrome.positive;
       if (sign < 0) return chrome.negative;
       return chrome.textMuted;
     },
   };
 }
+
+/**
+ * Il tema come lo vedono i componenti. Derivato dalla funzione invece di
+ * dichiarato a parte: un ruolo aggiunto a `getChartTheme` è subito disponibile,
+ * senza una seconda lista da tenere allineata.
+ */
+export type ChartTheme = ReturnType<typeof getChartTheme>;
 
 /**
  * Props di un pattern SVG a righe 45°, il canale TEXTURE della skill.
@@ -163,7 +189,11 @@ export function getChartTheme(mode = detectMode()) {
  *   <defs><pattern {...h.patternProps}><path {...h.pathProps} /></pattern></defs>
  *   <Bar fill={h.fill} />
  */
-export function hatch45(id, color, { spacing = 6, strokeWidth = 2 } = {}) {
+export function hatch45(
+  id: string,
+  color: string,
+  { spacing = 6, strokeWidth = 2 }: { spacing?: number; strokeWidth?: number } = {}
+) {
   return {
     id,
     fill: `url(#${id})`,

@@ -1,11 +1,13 @@
 import { DASH, date, money, monthLabel, num, qty } from "../format";
-import type { CalendarEvent } from "../types";
+import type { CalendarEvent, MonthlyIncomeTotal } from "../types";
 
 interface AgendaListProps {
+  /** Eventi di GET /api/calendar. */
   events: CalendarEvent[];
-  monthlyTotals?: any;
+  /** Totali mensili della stessa risposta. */
+  monthlyTotals?: MonthlyIncomeTotal[];
   baseCcy?: string;
-  onConfirm?: (...args: any[]) => void;
+  onConfirm?: (event: CalendarEvent) => void;
 }
 
 
@@ -17,7 +19,7 @@ interface AgendaListProps {
 // l'importo. La domanda "è davvero un grafico?" manda questo caso su una
 // lista/tabella, e il confronto tra mesi lo fa il grafico a colonne accanto.
 
-const KIND_LABELS = {
+const KIND_LABELS: Record<string, string> = {
   COUPON: "Cedola",
   DIVIDEND: "Dividendo",
   REDEMPTION: "Rimborso",
@@ -28,21 +30,21 @@ const KIND_LABELS = {
 // La convenzione dell'importo per unità va DICHIARATA, non indovinata: per le
 // cedole è per 100 di NOMINALE, per i dividendi è per azione. Confonderle sbaglia
 // di un fattore 10 (docs/decisions.md §9).
-const UNIT_LABELS = {
+const UNIT_LABELS: Record<string, string> = {
   per_100_nominale: "per 100 di nominale",
   per_azione: "per azione",
 };
 
 // `confidence` si rende con PIENO vs TRATTEGGIATO più un'etichetta testuale: il
 // canale visivo da solo non basta, e la parola dice qual è la fonte del dato.
-const CONFIDENCE = {
+const CONFIDENCE: Record<string, { label: string; fill: "solid" | "dashed" }> = {
   paid: { label: "incassato", fill: "solid" },
   announced: { label: "annunciato dall'emittente", fill: "solid" },
   scheduled: { label: "da scadenzario cedolare", fill: "dashed" },
   estimated: { label: "stimato", fill: "dashed" },
 };
 
-function Confidence({ confidence }) {
+function Confidence({ confidence }: { confidence: string }) {
   const c = CONFIDENCE[confidence] || { label: confidence, fill: "dashed" };
   return (
     <span className="pt-conf pt-agenda-conf">
@@ -52,31 +54,25 @@ function Confidence({ confidence }) {
   );
 }
 
-function groupByMonth(events) {
-  const groups = new Map();
+function groupByMonth(events: CalendarEvent[]) {
+  const groups = new Map<string, CalendarEvent[]>();
   for (const ev of events) {
     const key = String(ev.payDate).slice(0, 7);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(ev);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(ev);
+    else groups.set(key, [ev]);
   }
   return [...groups.entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([key, items]) => ({
       key,
-      items: [...items].sort((a, b) => (a.payDate < b.payDate ? -1 : 1)),
+      items: [...items].sort((a, b) => ((a.payDate ?? "") < (b.payDate ?? "") ? -1 : 1)),
     }));
 }
 
-/**
- * @param {object} props
- * @param {Array} props.events eventi di GET /api/calendar
- * @param {Array} [props.monthlyTotals] totali mensili della stessa risposta
- * @param {string} props.baseCcy
- * @param {(event: object) => void} [props.onConfirm]
- */
 export default function AgendaList({ events, monthlyTotals, baseCcy = "EUR", onConfirm }: AgendaListProps) {
   const groups = groupByMonth(events || []);
-  const totals = new Map((monthlyTotals || []).map((t) => [t.month, t]));
+  const totals = new Map((monthlyTotals || []).map((t) => [t.month, t] as const));
 
   return (
     <div className="pt-agenda">

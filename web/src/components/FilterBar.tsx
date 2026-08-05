@@ -1,14 +1,30 @@
 import RangePicker from "./RangePicker";
+import type { Instrument } from "../types";
 
 interface TypeBadgeProps {
-  type?: any;
+  type?: string;
+}
+
+/**
+ * I filtri dei movimenti.
+ *
+ * `instrumentId` resta una STRINGA come ogni altro id: è un BIGINT serializzato
+ * in stringa e riattraversa la query string invariato. `q` è una ricerca LOCALE
+ * sulle righe già caricate — l'API non ha un parametro di testo libero.
+ */
+export interface MovementsFilter {
+  types: string[];
+  instrumentId: string | null;
+  from: string | null;
+  to: string | null;
+  q: string;
 }
 
 interface FilterBarProps {
-  value: string | null;
-  onChange?: (...args: any[]) => void;
-  instruments?: any[];
-  instrumentsError?: any;
+  value: MovementsFilter;
+  onChange?: (next: MovementsFilter) => void;
+  instruments?: Instrument[];
+  instrumentsError?: unknown;
 }
 
 
@@ -16,7 +32,7 @@ interface FilterBarProps {
 // gruppi. Vive qui perché è la lingua condivisa tra il filtro, la tabella e il
 // form: tre elenchi separati divergono alla prima aggiunta di un tipo.
 
-export const TX_TYPES = [
+export const TX_TYPES: string[] = [
   "BUY",
   "SELL",
   "DIVIDEND",
@@ -30,7 +46,7 @@ export const TX_TYPES = [
   "RETURN_OF_CAPITAL",
 ];
 
-export const TX_TYPE_LABELS = {
+export const TX_TYPE_LABELS: Record<string, string> = {
   BUY: "Acquisto",
   SELL: "Vendita",
   DIVIDEND: "Dividendo",
@@ -45,7 +61,7 @@ export const TX_TYPE_LABELS = {
 };
 
 /** Tono del badge: entrate, uscite, neutro. Non è il segno del netto, è la natura. */
-export const TX_TYPE_TONE = {
+export const TX_TYPE_TONE: Record<string, string> = {
   BUY: "buy",
   SELL: "sell",
   DIVIDEND: "income",
@@ -59,7 +75,7 @@ export const TX_TYPE_TONE = {
   RETURN_OF_CAPITAL: "income",
 };
 
-const GROUPS = {
+const GROUPS: Record<string, { label: string; types: string[] }> = {
   trades: { label: "Compravendite", types: ["BUY", "SELL"] },
   income: { label: "Redditi", types: ["DIVIDEND", "COUPON", "INTEREST", "RETURN_OF_CAPITAL"] },
   costs: { label: "Costi", types: ["FEE", "TAX"] },
@@ -67,27 +83,21 @@ const GROUPS = {
 };
 
 /** Etichetta di un tipo di movimento, con il codice grezzo come rete di sicurezza. */
-export function txTypeLabel(type) {
-  return TX_TYPE_LABELS[type] || type;
+export function txTypeLabel(type: string | undefined): string {
+  return (type && TX_TYPE_LABELS[type]) || type || "";
 }
 
 export function TypeBadge({ type }: TypeBadgeProps) {
   return (
-    <span className={`badge badge--tx badge--tx-${TX_TYPE_TONE[type] || "neutral"}`}>
+    <span className={`badge badge--tx badge--tx-${(type && TX_TYPE_TONE[type]) || "neutral"}`}>
       {txTypeLabel(type)}
     </span>
   );
 }
 
-/**
- * Barra dei filtri dei movimenti.
- *
- * `value` = { types: string[], instrumentId: string, from, to, q }. Il valore
- * resta stringa anche per instrumentId: è un BIGINT serializzato in stringa e
- * riattraversa la query string invariato.
- */
+/** Barra dei filtri dei movimenti. */
 export default function FilterBar({ value, onChange, instruments = [], instrumentsError = null }: FilterBarProps) {
-  const set = (patch) => onChange({ ...value, ...patch });
+  const set = (patch: Partial<MovementsFilter>) => onChange?.({ ...value, ...patch });
 
   const typeSelectValue = (() => {
     if (!value.types || value.types.length === 0) return "";
@@ -99,9 +109,9 @@ export default function FilterBar({ value, onChange, instruments = [], instrumen
     return group ? `group:${group[0]}` : "";
   })();
 
-  const onTypeChange = (raw) => {
+  const onTypeChange = (raw: string) => {
     if (!raw) return set({ types: [] });
-    if (raw.startsWith("group:")) return set({ types: GROUPS[raw.slice(6)].types });
+    if (raw.startsWith("group:")) return set({ types: GROUPS[raw.slice(6)]?.types ?? [] });
     return set({ types: [raw] });
   };
 
@@ -175,7 +185,7 @@ export default function FilterBar({ value, onChange, instruments = [], instrumen
         <button
           type="button"
           className="btn btn--ghost btn--small filterbar-reset"
-          onClick={() => onChange({ types: [], instrumentId: null, from: null, to: null, q: "" })}
+          onClick={() => onChange?.({ types: [], instrumentId: null, from: null, to: null, q: "" })}
           disabled={!active}
         >
           Azzera filtri

@@ -7,12 +7,14 @@ import useElementWidth from "./useElementWidth";
 import { textOnFill } from "./contrast";
 import { textWidth } from "./textWidth";
 import { toNumberOrZero } from "./numbers";
+import type { AllocationGroup } from "../types";
+import type { ReactNode } from "react";
 
 interface AllocationBarProps {
-  items?: any;
+  items?: AllocationGroup[];
   baseCcy?: string;
   title: string;
-  subtitle?: any;
+  subtitle?: ReactNode;
   refetching?: boolean;
 }
 
@@ -45,9 +47,11 @@ export default function AllocationBar({
   refetching = false,
 }: AllocationBarProps) {
   const theme = useChartTheme();
-  const barRef = useRef(null);
+  const barRef = useRef<HTMLDivElement>(null);
   const barWidth = useElementWidth(barRef);
-  const [hover, setHover] = useState(null);
+  // L'indice del segmento sotto il puntatore (o col focus), non il segmento: è
+  // ciò che i quattro handler qui sotto confrontano.
+  const [hover, setHover] = useState<number | null>(null);
 
   const rows = useMemo(() => {
     const list = (items || []).filter((it) => toNumberOrZero(it.weight) > 0);
@@ -57,7 +61,7 @@ export default function AllocationBar({
     return list.map((it, i) => {
       const weight = toNumberOrZero(it.weight);
       const widthPx = usable * weight;
-      const fits = (candidate) =>
+      const fits = (candidate: string) =>
         textWidth(candidate, LABEL_FONT) + LABEL_PADDING * 2 <= widthPx;
       // Dal più informativo al meno: nome + peso, nome, solo peso. Se nemmeno il
       // peso entra, l'etichetta salta e il valore resta raggiungibile da
@@ -126,7 +130,7 @@ export default function AllocationBar({
       legend={rows.map((r) => ({
         label: r.label,
         color: r.color,
-        mark: "rect",
+        mark: "rect" as const,
         note: pct(r.weightRaw, 1),
       }))}
       refetching={refetching}
@@ -169,9 +173,14 @@ export default function AllocationBar({
                       label: "Valore",
                       value: money(r.marketValue, baseCcy),
                       color: r.color,
-                      mark: "rect",
+                      mark: "rect" as const,
                     },
-                    { label: "Peso", value: pct(r.weightRaw), color: r.color, mark: "rect" },
+                    {
+                      label: "Peso",
+                      value: pct(r.weightRaw),
+                      color: r.color,
+                      mark: "rect" as const,
+                    },
                   ]}
                 />
               </span>

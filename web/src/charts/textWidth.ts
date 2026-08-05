@@ -6,13 +6,15 @@
 // impilata fuori posto — semplicemente non si stampa, e il valore resta
 // raggiungibile da legenda, tooltip e vista tabellare.
 
-let ctx = null;
+// `false` = canvas non disponibile, già tentato: distinto da `null` = mai tentato,
+// così l'ambiente senza canvas non ripaga il try/catch a ogni misura.
+let ctx: CanvasRenderingContext2D | false | null = null;
 
-function context() {
+function context(): CanvasRenderingContext2D | false {
   if (ctx !== null) return ctx;
   try {
     const canvas = document.createElement("canvas");
-    ctx = canvas.getContext("2d");
+    ctx = canvas.getContext("2d") ?? false;
   } catch {
     ctx = false;
   }
@@ -25,7 +27,7 @@ function context() {
  * Se il canvas non è disponibile (SSR, ambiente di test) si stima per eccesso:
  * sbagliare in eccesso significa stampare un'etichetta in meno, non tagliarne una.
  */
-export function textWidth(text, font = "600 12px system-ui, sans-serif") {
+export function textWidth(text: unknown, font = "600 12px system-ui, sans-serif"): number {
   const s = String(text ?? "");
   const c = context();
   if (!c) return s.length * 7.4;
@@ -34,6 +36,10 @@ export function textWidth(text, font = "600 12px system-ui, sans-serif") {
 }
 
 /** true se `text` entra in `available` px lasciando `padding` px per lato. */
-export function fitsIn(text, available, { font, padding = 8 } = {}) {
+export function fitsIn(
+  text: unknown,
+  available: number,
+  { font, padding = 8 }: { font?: string; padding?: number } = {}
+): boolean {
   return textWidth(text, font) + padding * 2 <= available;
 }

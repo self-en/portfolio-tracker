@@ -6,7 +6,8 @@ interface SparklineProps {
   values: Array<string | null>;
   width?: number;
   height?: number;
-  label: ReactNode;
+  /** Va in `aria-label`, quindi è testo: l'SVG è un'immagine, non un contenitore. */
+  label: string;
 }
 
 

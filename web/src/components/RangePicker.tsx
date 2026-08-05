@@ -1,8 +1,14 @@
 
+/** L'intervallo scelto. null da entrambi i lati = "Tutto", nessun limite. */
+export interface DateRange {
+  from: string | null;
+  to: string | null;
+}
+
 interface RangePickerProps {
-  from: string;
-  to: string;
-  onChange?: (...args: any[]) => void;
+  from: string | null;
+  to: string | null;
+  onChange?: (range: DateRange) => void;
   legend?: string;
 }
 
@@ -12,16 +18,16 @@ interface RangePickerProps {
 // (docs/decisions.md §6): un Date in fuso locale, a ovest di Greenwich, farebbe
 // scivolare "oggi" al giorno prima.
 
-function iso(dateUtc) {
+function iso(dateUtc: Date): string {
   return dateUtc.toISOString().slice(0, 10);
 }
 
-function today() {
+function today(): string {
   const now = new Date();
   return iso(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())));
 }
 
-function minusMonths(isoDate, months) {
+function minusMonths(isoDate: string, months: number): string {
   const [y, m, d] = isoDate.split("-").map(Number);
   // Il giorno 31 in un mese da 30 rientrerebbe nel mese successivo: si limita al
   // numero di giorni del mese di arrivo.
@@ -30,7 +36,14 @@ function minusMonths(isoDate, months) {
   return iso(new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(d, lastDay))));
 }
 
-const PRESETS = [
+/** `from()` torna null per "Tutto": nessun limite inferiore. */
+interface Preset {
+  id: string;
+  label: string;
+  from: () => string | null;
+}
+
+const PRESETS: Preset[] = [
   { id: "1M", label: "1M", from: () => minusMonths(today(), 1) },
   { id: "3M", label: "3M", from: () => minusMonths(today(), 3) },
   { id: "6M", label: "6M", from: () => minusMonths(today(), 6) },
@@ -40,9 +53,9 @@ const PRESETS = [
 ];
 
 export default function RangePicker({ from, to, onChange, legend = "Intervallo" }: RangePickerProps) {
-  const apply = (preset) => {
+  const apply = (preset: Preset) => {
     const start = preset.from();
-    onChange({ from: start, to: start ? today() : null });
+    onChange?.({ from: start, to: start ? today() : null });
   };
 
   // Il preset attivo si riconosce ricalcolandolo: nessuno stato duplicato che possa
@@ -76,7 +89,7 @@ export default function RangePicker({ from, to, onChange, legend = "Intervallo" 
             type="date"
             value={from ?? ""}
             max={to || undefined}
-            onChange={(e) => onChange({ from: e.target.value || null, to })}
+            onChange={(e) => onChange?.({ from: e.target.value || null, to })}
           />
         </label>
         <label className="field field--inline">
@@ -86,7 +99,7 @@ export default function RangePicker({ from, to, onChange, legend = "Intervallo" 
             type="date"
             value={to ?? ""}
             min={from || undefined}
-            onChange={(e) => onChange({ from, to: e.target.value || null })}
+            onChange={(e) => onChange?.({ from, to: e.target.value || null })}
           />
         </label>
       </div>

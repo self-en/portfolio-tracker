@@ -1,20 +1,25 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { patch, post } from "../api";
+import { patch, post, fieldErrorsOf, toFormError } from "../api";
 import { num } from "../format";
 import { DecimalInput, Field, toDecimal } from "./Money";
 import Spinner from "./Spinner";
 import SymbolSearch from "./SymbolSearch";
-import type { Instrument } from "../types";
+import type { FormEvent } from "react";
+import type { FieldIssue, FormError } from "../api";
+import type { Amount, Instrument, SymbolHit } from "../types";
 
 interface InstrumentFormProps {
-  instrument?: Instrument;
-  onSaved?: (...args: any[]) => void;
-  onCancel?: (...args: any[]) => void;
+  /** null (o assente) = creazione. */
+  instrument?: Instrument | null;
+  onSaved?: (saved: Instrument) => void;
+  onCancel?: () => void;
 }
 
+/** Coppie [valore, etichetta] per i select. */
+type Choice = [value: string, label: string];
 
-const ASSET_CLASSES = [
+const ASSET_CLASSES: Choice[] = [
   ["EQUITY", "Azione"],
   ["ETF", "ETF"],
   ["BOND", "Obbligazione"],
@@ -25,7 +30,7 @@ const ASSET_CLASSES = [
 
 const DAY_COUNTS = ["ACT/ACT-ICMA", "30E/360", "ACT/365F", "ACT/360"];
 
-const COUPON_FREQUENCIES = [
+const COUPON_FREQUENCIES: Choice[] = [
   ["2", "Semestrale (2)"],
   ["1", "Annuale (1)"],
   ["4", "Trimestrale (4)"],
@@ -42,7 +47,7 @@ const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "SEK", "DKK", "NOK", "CAD
  * su un double introdurrebbe l'errore di rappresentazione proprio nel tasso che il
  * database conserva come frazione esatta (docs/decisions.md §9).
  */
-export function pctToFraction(input) {
+export function pctToFraction(input: string | number | null | undefined): string | null {
   const s = toDecimal(input);
   if (s === null) return null;
   const neg = s.startsWith("-");
@@ -57,7 +62,7 @@ export function pctToFraction(input) {
 }
 
 /** Frazione → percentuale: "0.0345" → "3.45". L'inverso, sempre sulla stringa. */
-export function fractionToPct(value) {
+export function fractionToPct(value: string | number | null | undefined): string {
   const s = toDecimal(value);
   if (s === null) return "";
   const neg = s.startsWith("-");
@@ -69,9 +74,58 @@ export function fractionToPct(value) {
   return (neg ? "-" : "") + (rest ? `${head}.${rest}` : head);
 }
 
-const str = (v) => (v === null || v === undefined ? "" : String(v));
+const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
-const EMPTY = {
+/**
+ * Lo stato del form: TUTTO stringhe (più un booleano), perché è ciò che i campi
+ * contengono. La conversione verso la forma che il server valida avviene una sola
+ * volta, in `payload`.
+ */
+interface FormState {
+  assetClass: string;
+  name: string;
+  ticker: string;
+  isin: string;
+  exchange: string;
+  currency: string;
+  priceSource: string;
+  quoteConvention: string;
+  faceValue: string;
+  /** In PERCENTUALE: il database tiene la frazione, l'utente ragiona in percento. */
+  couponRatePct: string;
+  couponFrequency: string;
+  firstCouponDate: string;
+  maturityDate: string;
+  dayCount: string;
+  issuer: string;
+  notes: string;
+  active: boolean;
+}
+
+/** Il corpo di POST/PATCH /api/instruments. */
+interface InstrumentPayload {
+  assetClass: string;
+  name: string;
+  ticker: string | null;
+  isin: string | null;
+  exchange: string | null;
+  currency: string;
+  priceSource: string;
+  quoteConvention: string;
+  issuer: string | null;
+  notes: string | null;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  faceValue: Amount;
+  couponRate: Amount;
+  /** Stringa del select: lo schema del server accetta stringa o numero. */
+  couponFrequency: string | null;
+  firstCouponDate: string | null;
+  maturityDate: string | null;
+  dayCount: string | null;
+}
+
+const EMPTY: FormState = {
   assetClass: "ETF",
   name: "",
   ticker: "",
@@ -91,11 +145,11 @@ const EMPTY = {
   active: true,
 };
 
-function formFromInstrument(inst) {
+function formFromInstrument(inst: Instrument | null | undefined): FormState {
   if (!inst) return { ...EMPTY };
-  const bond = inst.bond || {};
+  const bond = inst.bond;
   return {
-    assetClass: inst.assetClass,
+    assetClass: inst.assetClass || EMPTY.assetClass,
     name: inst.name || "",
     ticker: inst.ticker || "",
     isin: inst.isin || "",
@@ -103,16 +157,17 @@ function formFromInstrument(inst) {
     currency: inst.currency || "EUR",
     priceSource: inst.priceSource || "yahoo",
     quoteConvention: inst.quoteConvention || "PRICE",
-    faceValue: str(bond.faceValue),
+    faceValue: str(bond?.faceValue),
     // Il database tiene la FRAZIONE, l'utente ragiona in percentuale: la
     // conversione è visibile sotto il campo, non nascosta.
-    couponRatePct: fractionToPct(bond.couponRate),
-    couponFrequency: bond.couponFrequency === null || bond.couponFrequency === undefined
-      ? "2"
-      : String(bond.couponFrequency),
-    firstCouponDate: bond.firstCouponDate || "",
-    maturityDate: bond.maturityDate || "",
-    dayCount: bond.dayCount || "ACT/ACT-ICMA",
+    couponRatePct: fractionToPct(bond?.couponRate),
+    couponFrequency:
+      bond?.couponFrequency === null || bond?.couponFrequency === undefined
+        ? "2"
+        : String(bond.couponFrequency),
+    firstCouponDate: bond?.firstCouponDate || "",
+    maturityDate: bond?.maturityDate || "",
+    dayCount: bond?.dayCount || "ACT/ACT-ICMA",
     issuer: inst.issuer || "",
     notes: inst.notes || "",
     active: inst.active !== false,
@@ -122,10 +177,10 @@ function formFromInstrument(inst) {
 export default function InstrumentForm({ instrument = null, onSaved, onCancel }: InstrumentFormProps) {
   const editing = Boolean(instrument?.id);
   const queryClient = useQueryClient();
-  const [form, setForm] = useState(() => formFromInstrument(instrument));
-  const [error, setError] = useState(null);
+  const [form, setForm] = useState<FormState>(() => formFromInstrument(instrument));
+  const [error, setError] = useState<FormError | null>(null);
 
-  const set = (patchObj) => setForm((f) => ({ ...f, ...patchObj }));
+  const set = (patchObj: Partial<FormState>) => setForm((f) => ({ ...f, ...patchObj }));
 
   const isBond = form.assetClass === "BOND";
   const showBondFields = isBond || form.quoteConvention === "PCT_OF_NOMINAL";
@@ -134,7 +189,7 @@ export default function InstrumentForm({ instrument = null, onSaved, onCancel }:
   // Le obbligazioni non hanno copertura di mercato (verificato: Yahoo restituisce
   // zero risultati sui BTP). Passando a BOND si propone subito il pricing manuale e
   // la quotazione in percentuale di nominale, che è la coppia corretta.
-  const onAssetClassChange = (next) => {
+  const onAssetClassChange = (next: string) => {
     if (next === "BOND") {
       set({
         assetClass: next,
@@ -154,7 +209,7 @@ export default function InstrumentForm({ instrument = null, onSaved, onCancel }:
     // ma conserva i default degli enum, quindi omettere `priceSource` lo riporta a
     // "yahoo" — su un'obbligazione manuale il salvataggio verrebbe rifiutato
     // (verificato con curl).
-    const p = {
+    const p: InstrumentPayload = {
       assetClass: form.assetClass,
       name: form.name.trim(),
       ticker: form.ticker.trim() || null,
@@ -193,32 +248,28 @@ export default function InstrumentForm({ instrument = null, onSaved, onCancel }:
   }, [form, showBondFields, zeroCoupon, couponFraction]);
 
   const save = useMutation({
-    mutationFn: (bodyObj) =>
-      editing ? patch(`/instruments/${instrument.id}`, bodyObj) : post("/instruments", bodyObj),
+    mutationFn: (bodyObj: InstrumentPayload) =>
+      instrument
+        ? patch<Instrument>(`/instruments/${instrument.id}`, bodyObj)
+        : post<Instrument>("/instruments", bodyObj),
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["instruments"] });
       queryClient.invalidateQueries({ queryKey: ["portfolio"] });
       queryClient.invalidateQueries({ queryKey: ["calendar"] });
       onSaved?.(saved);
     },
-    onError: (err) => setError(err),
+    onError: (err) => setError(toFormError(err)),
   });
 
-  const fieldErrors = useMemo(() => {
-    const out = {};
-    if (Array.isArray(error?.details)) {
-      for (const d of error.details) if (d?.field) out[d.field] = d.message;
-    }
-    return out;
-  }, [error]);
+  const fieldErrors = useMemo(() => fieldErrorsOf(error), [error]);
 
-  const onSubmit = (e) => {
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     save.mutate(payload);
   };
 
-  const onSymbolSelect = (hit) => {
+  const onSymbolSelect = (hit: SymbolHit) => {
     set({
       ticker: hit.symbol || form.ticker,
       name: form.name || hit.name || "",
@@ -227,20 +278,30 @@ export default function InstrumentForm({ instrument = null, onSaved, onCancel }:
     });
   };
 
+  // `details` porta due cose diverse secondo il codice: per un conflict è lo
+  // strumento che esiste già, per un validation_error l'elenco dei campi.
+  const conflict =
+    error?.code === "conflict"
+      ? (error.details as { name?: string; isin?: string } | null)
+      : null;
+  const issues: FieldIssue[] = Array.isArray(error?.details)
+    ? (error.details as FieldIssue[])
+    : [];
+
   return (
     <form className="tx-form" onSubmit={onSubmit} noValidate>
       {error ? (
         <div className="form-error" role="alert">
           {error.message}
-          {error.code === "conflict" && error.details?.name ? (
+          {conflict?.name ? (
             <p className="small">
-              Esiste già: {error.details.name}
-              {error.details.isin ? ` (${error.details.isin})` : ""}.
+              Esiste già: {conflict.name}
+              {conflict.isin ? ` (${conflict.isin})` : ""}.
             </p>
           ) : null}
-          {Array.isArray(error.details) && error.details.length > 0 ? (
+          {issues.length > 0 ? (
             <ul className="list">
-              {error.details.map((d, i) => (
+              {issues.map((d, i) => (
                 <li key={`${d.field}:${i}`}>
                   <strong>{d.field}</strong>: {d.message}
                 </li>

@@ -1,18 +1,19 @@
 import { useEffect, useRef } from "react";
 import Spinner from "./Spinner";
+import type { ReactNode } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
   title?: string;
-  message?: any;
-  detail?: any;
-  confirmLabel?: string;
-  cancelLabel?: string;
+  message?: ReactNode;
+  detail?: ReactNode;
+  confirmLabel?: ReactNode;
+  cancelLabel?: ReactNode;
   danger?: boolean;
   busy?: boolean;
-  extraAction?: any;
-  onConfirm?: (...args: any[]) => void;
-  onCancel?: (...args: any[]) => void;
+  extraAction?: ReactNode;
+  onConfirm?: () => void;
+  onCancel?: () => void;
 }
 
 
@@ -35,12 +36,12 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const cancelRef = useRef(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return undefined;
     cancelRef.current?.focus();
-    const onKeyDown = (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) onCancel?.();
     };
     document.addEventListener("keydown", onKeyDown);

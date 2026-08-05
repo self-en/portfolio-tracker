@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { RefObject } from "react";
 
 /**
  * Larghezza in px di un elemento, osservata.
@@ -7,7 +8,7 @@ import { useEffect, useState } from "react";
  * segmento: senza la larghezza reale si finirebbe per tagliare il testo, che è
  * peggio del non stamparlo.
  */
-export default function useElementWidth(ref) {
+export default function useElementWidth(ref: RefObject<Element | null>): number {
   const [width, setWidth] = useState(0);
 
   useEffect(() => {

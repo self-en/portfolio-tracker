@@ -2,27 +2,48 @@ import { createContext, useCallback, useContext, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 import { get, post } from "./api";
+import { ApiError } from "./api";
 import Spinner from "./components/Spinner";
 import EmptyState from "./components/EmptyState";
+import type { ReactNode } from "react";
+import type { AuthMe } from "./types";
 
 interface AuthProviderProps {
   children?: ReactNode;
 }
 
 interface NotConfiguredProps {
-  error: ReactNode;
+  error: ApiError | null;
 }
 
 interface RequireAuthProps {
   children?: ReactNode;
 }
 
+interface AuthContextValue {
+  isLoading: boolean;
+  authenticated: boolean;
+  expiresAt: string | null;
+  error: ApiError | null;
+  /** Locked mode: la config del deployment è incompleta. */
+  notConfigured: boolean;
+  dbUnavailable: boolean;
+  refresh: () => void;
+  logout: () => Promise<void>;
+}
+
+/** I dettagli che l'errore di locked mode porta con sé. */
+interface NotConfiguredDetails {
+  reasons?: string[];
+  hint?: string;
+}
+
 
 export const AUTH_QUERY_KEY = ["auth", "me"];
 
-const AuthContext = createContext(null);
+const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function useAuth() {
+export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth richiede AuthProvider");
   return ctx;
@@ -35,9 +56,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // esiste una sessione senza incassare un 401 e senza far scattare il redirect
   // globale. `retry: false` perché una risposta negativa è un fatto, non un
   // guasto da riprovare.
-  const query = useQuery({
+  //
+  // L'errore è tipizzato ApiError perché è l'unica cosa che api.ts lancia: è ciò
+  // che rende leggibili `isNotConfigured`/`isDbUnavailable` qui sotto.
+  const query = useQuery<AuthMe, ApiError>({
     queryKey: AUTH_QUERY_KEY,
-    queryFn: () => get("/auth/me"),
+    queryFn: () => get<AuthMe>("/auth/me"),
     retry: false,
   });
 
@@ -52,7 +76,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [queryClient]);
 
-  const value = useMemo(
+  const value = useMemo<AuthContextValue>(
     () => ({
       isLoading: query.isPending,
       authenticated: query.data?.authenticated === true,
@@ -71,7 +95,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
 /** Schermata di locked mode: la config del deployment è incompleta. */
 export function NotConfigured({ error }: NotConfiguredProps) {
-  const reasons = error?.details?.reasons;
+  const details = (error?.details ?? null) as NotConfiguredDetails | null;
+  const reasons = details?.reasons;
   return (
     <main className="page page--centered">
       <div className="card">
@@ -84,7 +109,7 @@ export function NotConfigured({ error }: NotConfiguredProps) {
             ))}
           </ul>
         ) : null}
-        {error?.details?.hint ? <p className="muted">{error.details.hint}</p> : null}
+        {details?.hint ? <p className="muted">{details.hint}</p> : null}
         <button type="button" className="btn" onClick={() => window.location.reload()}>
           Ho aggiornato la configurazione, ricarica
         </button>

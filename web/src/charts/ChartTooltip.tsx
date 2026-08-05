@@ -1,9 +1,51 @@
-import type { PositionRow } from "../types";
+import type { ReactNode } from "react";
+import type { TooltipContentProps, TooltipValueType } from "recharts";
+import type { NameType } from "recharts/types/component/DefaultTooltipContent";
+
+/**
+ * Come si identifica una serie nel tooltip: un TRATTO del suo colore ("line", il
+ * default) oppure un quadrotto ("rect") per le colonne in stack.
+ */
+export type KeyMark = "line" | "rect";
+
+/**
+ * Una riga di tooltip: `value` è GIÀ FORMATTATO (arriva da web/src/format.ts).
+ * Qui non entrano importi grezzi - il tooltip non formatta, mostra.
+ */
+export interface TooltipRow {
+  label: string;
+  value: string;
+  color: string;
+  /** `strokeDasharray` della serie, per distinguere il proiettato dal certo. */
+  dash?: string;
+  mark?: KeyMark;
+}
 
 interface ChartTooltipProps {
-  title: string;
-  rows: PositionRow[];
-  flag?: any;
+  title?: string;
+  rows: TooltipRow[];
+  /** Avviso in evidenza (es. dati incompleti). */
+  flag?: ReactNode;
+}
+
+/**
+ * Le props che recharts passa a `<Tooltip content={...}>`.
+ *
+ * Si riusa il tipo di recharts invece di dichiararne uno più stretto: `content`
+ * accetta solo una funzione che accetti QUESTO, e una firma più precisa non è
+ * assegnabile.
+ */
+export type TooltipRenderProps = TooltipContentProps<TooltipValueType, NameType>;
+
+/**
+ * Il punto sotto il cursore, ristretto alla riga di `data` del grafico.
+ *
+ * recharts dichiara `payload[].payload` come `any`: questa funzione è l'UNICO
+ * posto dove quel valore viene ristretto, così i tooltip non ripetono il cast.
+ */
+export function pointOf<P>({ active, payload }: TooltipRenderProps): P | null {
+  if (!active || !payload || payload.length === 0) return null;
+  return (payload[0]?.payload as P | undefined) ?? null;
 }
 
 // Tooltip condiviso.
@@ -19,7 +61,7 @@ interface ChartTooltipProps {
 // Le etichette sono dati non fidati (arrivano da nomi di strumento inseriti a
 // mano): entrano nel DOM come testo React, mai come HTML.
 
-function Key({ color, dash, mark }) {
+function Key({ color, dash, mark }: Pick<TooltipRow, "color" | "dash" | "mark">) {
   if (mark === "rect") {
     return (
       <svg width="12" height="12" aria-hidden="true" focusable="false">
@@ -43,12 +85,7 @@ function Key({ color, dash, mark }) {
   );
 }
 
-/**
- * @param {object} props
- * @param {string} props.title riga di intestazione (la X)
- * @param {Array<{label: string, value: string, color: string, dash?: string, mark?: string}>} props.rows
- * @param {string} [props.flag] avviso in evidenza (es. dati incompleti)
- */
+/** `title` è la riga di intestazione: il valore sull'asse X. */
 export default function ChartTooltip({ title, rows, flag }: ChartTooltipProps) {
   return (
     <div className="pt-tooltip" role="tooltip">

@@ -1,13 +1,17 @@
 import type { Warning } from "../types";
 
 interface WarningsBannerProps {
-  warnings: Warning[];
+  /** Opzionale: quasi ogni risposta li porta, ma non sempre valorizzati. */
+  warnings?: Warning[];
 }
 
 // I warning del server portano sempre un `code`, non sempre un `message`
 // (`/api/system/status` manda solo code + details): il testo per l'utente vive
 // qui, così un codice nuovo degrada nel proprio codice invece di sparire.
-const TESTI = {
+//
+// Record<string, string> e non un'unione dei codici noti: il `code` arriva dal
+// server, e un codice che qui non c'è è il caso NORMALE, non un errore di tipo.
+const TESTI: Record<string, string> = {
   not_configured: "Configurazione incompleta: alcune funzioni sono disattivate.",
   db_unavailable: "Database non raggiungibile: i dati mostrati possono essere incompleti.",
   migration_checksum_mismatch:
@@ -21,7 +25,7 @@ const TESTI = {
   upstream_error: "Il fornitore dei prezzi non ha risposto: i dati possono essere vecchi.",
 };
 
-function testo(w) {
+function testo(w: Warning): string {
   return w.message || TESTI[w.code] || `Avviso: ${w.code}`;
 }
 

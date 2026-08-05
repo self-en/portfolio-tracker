@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 
 interface DrawerProps {
   open: boolean;
   title: string;
-  subtitle?: any;
-  onClose?: (...args: any[]) => void;
+  subtitle?: ReactNode;
+  onClose?: () => void;
   children?: ReactNode;
-  footer?: any;
+  footer?: ReactNode;
 }
 
 
@@ -17,17 +18,17 @@ interface DrawerProps {
  * l'elenco dietro, che è il contesto di ciò che si sta scrivendo.
  */
 export default function Drawer({ open, title, subtitle, onClose, children, footer }: DrawerProps) {
-  const panelRef = useRef(null);
+  const panelRef = useRef<HTMLElement>(null);
 
   // Esc chiude, e il focus entra nel pannello: senza, la tastiera resterebbe sulla
   // tabella dietro, con l'utente che digita in un campo che non vede.
   useEffect(() => {
     if (!open) return undefined;
-    const onKeyDown = (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose?.();
     };
     document.addEventListener("keydown", onKeyDown);
-    const first = panelRef.current?.querySelector(
+    const first = panelRef.current?.querySelector<HTMLElement>(
       "input:not([readonly]), select, textarea, button"
     );
     first?.focus();

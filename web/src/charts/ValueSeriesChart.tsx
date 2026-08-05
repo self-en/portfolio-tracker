@@ -2,16 +2,32 @@ import { useId, useMemo } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { date as fmtDate, money, monthLabel, num } from "../format";
 import ChartFrame from "./ChartFrame";
-import ChartTooltip from "./ChartTooltip";
+import ChartTooltip, { pointOf } from "./ChartTooltip";
 import useChartTheme from "./useChartTheme";
 import { AREA_FILL_OPACITY } from "./contrast";
 import { toNumber } from "./numbers";
-import type { SeriesPoint } from "../types";
+import type { TooltipRenderProps, TooltipRow } from "./ChartTooltip";
+import type { LegendItems } from "./ChartLegend";
+import type { SeriesPoint, ValueSeriesResponse } from "../types";
 
 interface ValueSeriesChartProps {
   points: SeriesPoint[];
-  meta?: any;
+  meta?: Partial<ValueSeriesResponse["meta"]>;
   refetching?: boolean;
+}
+
+/**
+ * Un punto pronto per il disegno: i float per il pixel, `solid`/`dashed` per i
+ * due tratti della stessa serie, e `raw` con le stringhe originali da formattare.
+ */
+interface PlotPoint {
+  date: string;
+  value: number | null;
+  solid: number | null;
+  dashed: number | null;
+  netInvested: number | null;
+  partial: boolean;
+  raw: SeriesPoint;
 }
 
 
@@ -28,7 +44,7 @@ interface ValueSeriesChartProps {
 // dice quanti sono: uno zero silenzioso somiglia a un crollo del portafoglio, non
 // a un buco nei dati, ed è la peggior modalità di fallimento dell'intera app.
 
-const safe = (raw) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
+const safe = (raw: string) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
 
 const DASH_PARTIAL = "3 3";
 const DASH_INVESTED = "7 4";
@@ -38,7 +54,7 @@ const DASH_INVESTED = "7 4";
  * quello tratteggiato condividono i punti di confine, così la linea non si
  * spezza nel passaggio.
  */
-function split(points) {
+function split(points: SeriesPoint[]): PlotPoint[] {
   const n = points.length;
   const partial = points.map((p) => !!p.partial);
 
@@ -77,32 +93,33 @@ export default function ValueSeriesChart({ points, meta, refetching = false }: V
   const data = useMemo(() => split(points || []), [points]);
   const hasInvested = data.some((p) => p.netInvested !== null);
 
-  const formatX = (value) =>
+  const formatX = (value: string | number) =>
     granularity === "month" ? monthLabel(String(value).slice(0, 7)) : fmtDate(value);
 
-  const legend = [
-    { label: `Valore di mercato (${baseCcy})`, color: seriesColor, mark: "line" },
+  const legend: LegendItems = [
+    { label: `Valore di mercato (${baseCcy})`, color: seriesColor, mark: "line" as const },
     hasInvested && {
       label: "Investito netto",
       color: theme.textMuted,
-      mark: "line",
+      mark: "line" as const,
       dash: DASH_INVESTED,
       note: "versamenti meno prelievi",
     },
     partialPoints > 0 && {
       label: "Tratto con dati incompleti",
       color: seriesColor,
-      mark: "line",
+      mark: "line" as const,
       dash: DASH_PARTIAL,
       note: "prezzo o cambio mancante",
     },
-  ].filter(Boolean);
+  ];
 
-  const tooltip = ({ active, payload }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const point = payload[0]?.payload;
+  const tooltip = (props: TooltipRenderProps) => {
+    const point = pointOf<PlotPoint>(props);
     if (!point) return null;
-    const rows = [{ label: "Valore", value: money(point.raw.value, baseCcy), color: seriesColor }];
+    const rows: TooltipRow[] = [
+      { label: "Valore", value: money(point.raw.value, baseCcy), color: seriesColor },
+    ];
     if (point.netInvested !== null) {
       rows.push({
         label: "Investito netto",

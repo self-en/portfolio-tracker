@@ -1,20 +1,34 @@
 import EmptyState from "./EmptyState";
 import Spinner from "./Spinner";
-import type { ReactNode } from "react";
-import type { PositionRow } from "../types";
+import type { Key, ReactNode } from "react";
 
-interface DataTableProps {
-  columns?: any;
-  rows: PositionRow[];
-  rowKey?: any;
-  loading?: boolean;
-  error?: ReactNode;
-  empty?: any;
-  caption?: any;
-  footer?: any;
-  onRetry?: (...args: any[]) => void;
+/**
+ * Una colonna. Senza `render` la cella mostra `row[key]` così com'è, che è il
+ * motivo per cui `key` resta una stringa libera e non un `keyof Row`: le colonne
+ * con `render` usano spesso una chiave sintetica ("azioni") che non è un campo.
+ */
+export interface Column<Row> {
+  key: string;
+  header: ReactNode;
+  align?: "left" | "right";
+  render?: (row: Row, index: number) => ReactNode;
+  className?: string;
+  /** Nascosta sotto i 640px, dove le celle si impilano. */
+  hideOnNarrow?: boolean;
 }
 
+interface DataTableProps<Row> {
+  columns: Array<Column<Row>>;
+  rows: Row[] | null | undefined;
+  rowKey?: (row: Row, index: number) => Key;
+  loading?: boolean;
+  /** L'errore da mostrare: se ha un `message` si usa quello. */
+  error?: unknown;
+  empty?: ReactNode;
+  caption?: ReactNode;
+  footer?: ReactNode;
+  onRetry?: () => void;
+}
 
 /**
  * Tabella dati con gli stati espliciti: caricamento, errore, vuoto, popolata.
@@ -23,9 +37,10 @@ interface DataTableProps {
  * dimentica: una tabella che in errore mostra "nessun dato" fa credere all'utente
  * di non avere movimenti.
  *
- * @param {Array<{key, header, align?, render?, className?, hideOnNarrow?}>} columns
+ * Generica sulla riga: è ciò che tipizza i `render` delle colonne nel punto in cui
+ * vengono scritti, senza che ogni pagina annoti i suoi callback.
  */
-export default function DataTable({
+export default function DataTable<Row>({
   columns,
   rows,
   rowKey,
@@ -35,7 +50,7 @@ export default function DataTable({
   caption,
   footer = null,
   onRetry,
-}: DataTableProps) {
+}: DataTableProps<Row>) {
   if (loading) {
     return (
       <div className="table-status">
@@ -48,7 +63,7 @@ export default function DataTable({
     return (
       <div className="card error-card" role="alert">
         <p className="error-title">Impossibile caricare i dati</p>
-        <p className="muted">{error.message || String(error)}</p>
+        <p className="muted">{(error as { message?: string })?.message || String(error)}</p>
         {onRetry ? (
           <button type="button" className="btn" onClick={onRetry}>
             Riprova
@@ -101,7 +116,11 @@ export default function DataTable({
                   // CSS di impilare le celle sotto i 640px senza un secondo markup.
                   data-label={typeof c.header === "string" ? c.header : undefined}
                 >
-                  {c.render ? c.render(row, i) : row[c.key]}
+                  {/* Senza `render` si mostra il campo omonimo: `key` è una
+                      stringa libera, quindi qui l'accesso è per forza dinamico. */}
+                  {c.render
+                    ? c.render(row, i)
+                    : ((row as Record<string, unknown>)[c.key] as ReactNode)}
                 </td>
               ))}
             </tr>

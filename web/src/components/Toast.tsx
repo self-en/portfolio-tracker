@@ -1,34 +1,57 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+
+/** `error` sopravvive più a lungo e si annuncia come alert, non come status. */
+export type ToastTone = "info" | "success" | "error";
+
+export interface ToastOptions {
+  tone?: ToastTone;
+  /** 0 o meno: il toast resta finché non lo si chiude. */
+  durationMs?: number;
+}
+
+interface ToastEntry {
+  id: number;
+  message: ReactNode;
+  tone: ToastTone;
+}
+
+interface ToastApi {
+  show: (message: ReactNode, opts?: ToastOptions) => number;
+  dismiss: (id: number) => void;
+  success: (message: ReactNode, opts?: ToastOptions) => number;
+  error: (message: ReactNode, opts?: ToastOptions) => number;
+}
 
 interface ToastProviderProps {
   children?: ReactNode;
 }
 
 interface ToastProps {
-  tone?: string;
-  message?: any;
-  onDismiss?: (...args: any[]) => void;
+  tone?: ToastTone;
+  message?: ReactNode;
+  onDismiss?: () => void;
 }
 
 
-const ToastContext = createContext(null);
+const ToastContext = createContext<ToastApi | null>(null);
 
-export function useToast() {
+export function useToast(): ToastApi {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error("useToast richiede ToastProvider");
   return ctx;
 }
 
 export function ToastProvider({ children }: ToastProviderProps) {
-  const [toasts, setToasts] = useState([]);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
   const seq = useRef(0);
 
-  const dismiss = useCallback((id) => {
+  const dismiss = useCallback((id: number) => {
     setToasts((list) => list.filter((t) => t.id !== id));
   }, []);
 
   const show = useCallback(
-    (message, { tone = "info", durationMs = 5000 } = {}) => {
+    (message: ReactNode, { tone = "info", durationMs = 5000 }: ToastOptions = {}) => {
       seq.current += 1;
       const id = seq.current;
       setToasts((list) => [...list, { id, message, tone }]);
@@ -38,7 +61,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
     [dismiss]
   );
 
-  const api = useMemo(
+  const api = useMemo<ToastApi>(
     () => ({
       show,
       dismiss,

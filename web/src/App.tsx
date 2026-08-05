@@ -12,6 +12,7 @@ import Movements from "./pages/Movements";
 import Calendar from "./pages/Calendar";
 import Instruments from "./pages/Instruments";
 import InstrumentDetail from "./pages/InstrumentDetail";
+import type { PortfoliosResponse } from "./types";
 
 const NAV = [
   { to: "/", label: "Dashboard" },
@@ -24,7 +25,7 @@ function PortfolioSelect() {
   const { portfolioId, setPortfolioId } = useApp();
   const { data, isPending, error } = useQuery({
     queryKey: ["portfolios"],
-    queryFn: () => get("/portfolios"),
+    queryFn: () => get<PortfoliosResponse>("/portfolios"),
   });
 
   const items = data?.items ?? [];

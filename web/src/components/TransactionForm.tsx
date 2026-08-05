@@ -1,18 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, patch, post } from "../api";
+import { get, patch, post, fieldErrorsOf, toFormError } from "../api";
 import { DASH, money, num, qty as fmtQty } from "../format";
 import { useApp } from "../AppContext";
 import Money, { DecimalInput, Field, ReadOnlyValue, toDecimal } from "./Money";
 import Spinner from "./Spinner";
 import WarningsBanner from "./WarningsBanner";
 import { TX_TYPES, txTypeLabel } from "./FilterBar";
-import type { Transaction } from "../types";
+import type { FormEvent } from "react";
+import type { FieldIssue, FormError } from "../api";
+import type {
+  Amount,
+  InstrumentsResponse,
+  Transaction,
+  TransactionPreview,
+  Warning,
+} from "../types";
 
 interface TransactionFormProps {
-  transaction?: Transaction;
-  onSaved?: (...args: any[]) => void;
-  onCancel?: (...args: any[]) => void;
+  /** null (o assente) = creazione. */
+  transaction?: Transaction | null;
+  onSaved?: (saved: Transaction) => void;
+  onCancel?: () => void;
 }
 
 
@@ -38,7 +47,7 @@ const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "SEK", "DKK", "NOK", "CAD
 const PREVIEW_DEBOUNCE_MS = 400;
 
 /** Etichetta dell'importo lordo: la parola giusta cambia con il tipo. */
-const GROSS_LABELS = {
+const GROSS_LABELS: Record<string, string> = {
   DIVIDEND: "Dividendo lordo",
   COUPON: "Cedola lorda",
   INTEREST: "Interessi lordi",
@@ -49,7 +58,50 @@ const GROSS_LABELS = {
   RETURN_OF_CAPITAL: "Capitale rimborsato",
 };
 
-const EMPTY_FORM = {
+/**
+ * Lo stato del form: TUTTO stringhe, perché è ciò che i campi contengono. Denaro
+ * e quantità diventano la forma che il server valida una volta sola, in `payload`.
+ */
+interface FormState {
+  type: string;
+  instrumentId: string;
+  tradeDate: string;
+  settleDate: string;
+  quantity: string;
+  /** Per i titoli quotati in percentuale è QUESTO il campo primario, non la quantità. */
+  nominal: string;
+  price: string;
+  grossAmount: string;
+  fees: string;
+  taxes: string;
+  accruedInterest: string;
+  splitRatio: string;
+  tradeCcy: string;
+  fxRate: string;
+  note: string;
+}
+
+/** Il corpo di POST/PATCH /api/transactions e di POST /api/transactions/preview. */
+interface TransactionPayload {
+  type: string;
+  tradeDate: string;
+  fees: string;
+  taxes: string;
+  tradeCcy: string;
+  settleDate: string | null;
+  note: string | null;
+  instrumentId: string | null;
+  quantity: Amount;
+  nominal: Amount;
+  price: Amount;
+  grossAmount: Amount;
+  accruedInterest: Amount;
+  splitRatio: Amount;
+  fxRate: Amount;
+  portfolioId?: string;
+}
+
+const EMPTY_FORM: FormState = {
   type: "BUY",
   instrumentId: "",
   tradeDate: "",
@@ -75,9 +127,9 @@ function today() {
 }
 
 /** I numerici possono arrivare come number dal driver: in UI diventano stringhe. */
-const str = (v) => (v === null || v === undefined ? "" : String(v));
+const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
-function formFromTransaction(tx) {
+function formFromTransaction(tx: Transaction | null | undefined): FormState {
   if (!tx) return { ...EMPTY_FORM, tradeDate: today() };
   return {
     type: tx.type,
@@ -105,23 +157,24 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
   const { portfolioId } = useApp();
   const queryClient = useQueryClient();
 
-  const [form, setForm] = useState(() => formFromTransaction(transaction));
+  const [form, setForm] = useState<FormState>(() => formFromTransaction(transaction));
   // I due campi che il server precompila restano editabili: si tiene traccia di
   // quando l'utente li ha presi in mano, così il valore calcolato continua ad
   // aggiornarsi finché non lo tocca — e dopo non viene più sovrascritto.
   const [accruedTouched, setAccruedTouched] = useState(
-    Boolean(transaction?.accruedInterest) && String(transaction.accruedInterest) !== "0"
+    Boolean(transaction?.accruedInterest) && String(transaction?.accruedInterest) !== "0"
   );
   const [fxTouched, setFxTouched] = useState(
     Boolean(transaction?.fxRate) && (transaction?.tradeCcy || "EUR") !== "EUR"
   );
-  const [saveError, setSaveError] = useState(null);
+  const [saveError, setSaveError] = useState<FormError | null>(null);
 
-  const set = (patchObj) => setForm((f) => ({ ...f, ...patchObj }));
+  const set = (patchObj: Partial<FormState>) => setForm((f) => ({ ...f, ...patchObj }));
 
   const instrumentsQuery = useQuery({
     queryKey: ["instruments", { active: "true" }],
-    queryFn: ({ signal }) => get("/instruments", { query: { active: "true" }, signal }),
+    queryFn: ({ signal }) =>
+      get<InstrumentsResponse>("/instruments", { query: { active: "true" }, signal }),
   });
   const instruments = instrumentsQuery.data?.items ?? [];
 
@@ -145,7 +198,7 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
 
   // Cambiando tipo si azzerano i campi che quel tipo non usa: un prezzo rimasto in
   // memoria da un BUY finirebbe silenziosamente in un DEPOSIT.
-  const onTypeChange = (nextType) => {
+  const onTypeChange = (nextType: string) => {
     setForm((f) => ({
       ...f,
       type: nextType,
@@ -164,7 +217,7 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
     }));
   };
 
-  const onInstrumentChange = (nextId) => {
+  const onInstrumentChange = (nextId: string) => {
     const next = instruments.find((i) => String(i.id) === nextId) || null;
     setForm((f) => ({
       ...f,
@@ -181,8 +234,8 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
    * Corpo della richiesta. Denaro e quantità restano STRINGHE: `toDecimal` riscrive
    * la virgola italiana in punto, non converte.
    */
-  const payload = useMemo(() => {
-    const p = {
+  const payload = useMemo<TransactionPayload>(() => {
+    const p: TransactionPayload = {
       type: form.type,
       tradeDate: form.tradeDate,
       // In modifica si invia il record COMPLETO e non solo i campi cambiati: lo
@@ -245,10 +298,10 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
     return false;
   }, [payload, showInstrument, isTrade, isSplit, isAmount]);
 
-  const [preview, setPreview] = useState(null);
-  const [previewError, setPreviewError] = useState(null);
+  const [preview, setPreview] = useState<TransactionPreview | null>(null);
+  const [previewError, setPreviewError] = useState<FormError | null>(null);
   const [previewing, setPreviewing] = useState(false);
-  const previewAbort = useRef(null);
+  const previewAbort = useRef<AbortController | null>(null);
   const payloadKey = JSON.stringify(payload);
 
   useEffect(() => {
@@ -263,15 +316,18 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
       previewAbort.current = controller;
       setPreviewing(true);
       try {
-        const data = await post("/transactions/preview", JSON.parse(payloadKey), {
-          signal: controller.signal,
-        });
+        const data = await post<TransactionPreview>(
+          "/transactions/preview",
+          JSON.parse(payloadKey),
+          { signal: controller.signal }
+        );
         setPreview(data);
         setPreviewError(null);
       } catch (err) {
-        if (err?.name === "AbortError") return;
+        // Un abort è l'anteprima precedente che si fa da parte, non un errore.
+        if ((err as { name?: string })?.name === "AbortError") return;
         setPreview(null);
-        setPreviewError(err);
+        setPreviewError(toFormError(err));
       } finally {
         setPreviewing(false);
       }
@@ -302,8 +358,10 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
   }, [bondMode, preview, form.nominal]);
 
   const save = useMutation({
-    mutationFn: (bodyObj) =>
-      editing ? patch(`/transactions/${transaction.id}`, bodyObj) : post("/transactions", bodyObj),
+    mutationFn: (bodyObj: TransactionPayload) =>
+      transaction
+        ? patch<Transaction>(`/transactions/${transaction.id}`, bodyObj)
+        : post<Transaction>("/transactions", bodyObj),
     onSuccess: (saved) => {
       // Un movimento cambia posizioni, valorizzazione e scadenzario dei redditi:
       // si invalidano i tre prefissi, non le singole chiavi.
@@ -312,24 +370,20 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
       }
       onSaved?.(saved);
     },
-    onError: (err) => setSaveError(err),
+    onError: (err) => setSaveError(toFormError(err)),
   });
 
-  const onSubmit = (e) => {
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSaveError(null);
     save.mutate(payload);
   };
 
   // Errori per campo dal 422 del server: `details` è [{field, message}].
-  const fieldErrors = useMemo(() => {
-    const out = {};
-    const details = saveError?.details;
-    if (Array.isArray(details)) {
-      for (const d of details) if (d?.field) out[d.field] = d.message;
-    }
-    return out;
-  }, [saveError]);
+  const fieldErrors = useMemo(() => fieldErrorsOf(saveError), [saveError]);
+  const issues: FieldIssue[] = Array.isArray(saveError?.details)
+    ? (saveError.details as FieldIssue[])
+    : [];
 
   const ccy = preview?.tradeCcy || form.tradeCcy || "EUR";
   const accruedShown = accruedTouched ? form.accruedInterest : str(preview?.accruedInterest);
@@ -349,9 +403,9 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
       {saveError ? (
         <div className="form-error" role="alert">
           {saveError.message}
-          {Array.isArray(saveError.details) && saveError.details.length > 0 ? (
+          {issues.length > 0 ? (
             <ul className="list">
-              {saveError.details.map((d, i) => (
+              {issues.map((d, i) => (
                 <li key={`${d.field}:${i}`}>
                   <strong>{d.field}</strong>: {d.message}
                 </li>
@@ -689,6 +743,20 @@ export default function TransactionForm({ transaction = null, onSaved, onCancel 
  * Gli avvisi stanno IN CIMA e con role="alert": l'oversell si deve vedere prima di
  * confermare, non scoprire dopo nel ledger.
  */
+interface PreviewPanelProps {
+  /** false finché il payload non ha i campi che il server pretende. */
+  ready: boolean;
+  loading: boolean;
+  preview: TransactionPreview | null;
+  error: FormError | null;
+  warnings: Warning[];
+  /** true se un avviso riguarda l'operazione in corso, non il ledger esistente. */
+  hasPending: boolean;
+  ccy: string;
+  bondMode: boolean;
+  editing: boolean;
+}
+
 function PreviewPanel({
   ready,
   loading,
@@ -699,7 +767,7 @@ function PreviewPanel({
   ccy,
   bondMode,
   editing,
-}) {
+}: PreviewPanelProps) {
   if (!ready) {
     return (
       <div className="preview preview--idle">
@@ -712,12 +780,15 @@ function PreviewPanel({
   }
 
   if (error) {
+    const issues: FieldIssue[] = Array.isArray(error.details)
+      ? (error.details as FieldIssue[])
+      : [];
     return (
       <div className="preview preview--idle">
         <p className="muted small">
           Anteprima non disponibile: {error.message}
-          {Array.isArray(error.details) && error.details.length > 0
-            ? ` (${error.details.map((d) => `${d.field}: ${d.message}`).join("; ")})`
+          {issues.length > 0
+            ? ` (${issues.map((d) => `${d.field}: ${d.message}`).join("; ")})`
             : ""}
         </p>
       </div>

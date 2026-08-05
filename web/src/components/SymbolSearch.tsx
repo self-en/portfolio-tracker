@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { get } from "../api";
+import { ApiError } from "../api";
 import Spinner from "./Spinner";
+import type { SymbolHit, SymbolSearchResponse } from "../types";
 
 interface SymbolSearchProps {
-  onSelect?: (...args: any[]) => void;
+  onSelect?: (hit: SymbolHit) => void;
   disabled?: boolean;
 }
+
+/** `unavailable` non è un errore da riprovare: è l'invito a inserire a mano. */
+type SearchState = "idle" | "loading" | "ok" | "unavailable";
 
 
 const DEBOUNCE_MS = 350;
@@ -25,10 +30,10 @@ const MIN_CHARS = 2; // il server rifiuta con 422 sotto i 2 caratteri
  */
 export default function SymbolSearch({ onSelect, disabled = false }: SymbolSearchProps) {
   const [term, setTerm] = useState("");
-  const [items, setItems] = useState([]);
-  const [state, setState] = useState("idle"); // idle | loading | ok | unavailable
-  const [message, setMessage] = useState(null);
-  const abortRef = useRef(null);
+  const [items, setItems] = useState<SymbolHit[]>([]);
+  const [state, setState] = useState<SearchState>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const q = term.trim();
@@ -47,18 +52,23 @@ export default function SymbolSearch({ onSelect, disabled = false }: SymbolSearc
       abortRef.current = controller;
       setState("loading");
       try {
-        const data = await get("/market/search", { query: { q }, signal: controller.signal });
+        const data = await get<SymbolSearchResponse>("/market/search", {
+          query: { q },
+          signal: controller.signal,
+        });
         setItems(Array.isArray(data?.items) ? data.items : []);
         setState("ok");
         setMessage(null);
       } catch (err) {
-        if (err?.name === "AbortError") return;
+        // Un abort è la richiesta precedente che si fa da parte, non un guasto.
+        if ((err as { name?: string })?.name === "AbortError") return;
+        const fallback = "Ricerca non disponibile: inserisci ticker e ISIN a mano.";
         setItems([]);
         setState("unavailable");
         setMessage(
-          err?.code === "upstream_error" || err?.code === "network_error"
-            ? "Ricerca non disponibile: inserisci ticker e ISIN a mano."
-            : err?.message || "Ricerca non disponibile: inserisci ticker e ISIN a mano."
+          err instanceof ApiError && err.code !== "upstream_error" && err.code !== "network_error"
+            ? err.message || fallback
+            : fallback
         );
       }
     }, DEBOUNCE_MS);

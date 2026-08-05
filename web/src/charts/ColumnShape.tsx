@@ -9,11 +9,22 @@ import { clamp } from "./numbers";
 // conosce il gap di superficie tra i segmenti di uno stack.
 
 /**
- * @param {object} props props iniettate da recharts (x, y, width, height, fill,
- *   payload) più le nostre: `segment` dice quale dei due pezzi dello stack è.
+ * Le props geometriche le inietta recharts, quindi arrivano opzionali: `segment`
+ * è invece nostra, e dice quale dei due pezzi dello stack si sta disegnando.
  */
-export default function ColumnShape(props) {
-  const { x, y, width, height, fill, fillOpacity, segment, payload } = props;
+export interface ColumnShapeProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fill?: string;
+  fillOpacity?: number;
+  segment?: "confirmed" | "projected";
+  payload?: { confirmedValue?: number; projectedValue?: number };
+}
+
+export default function ColumnShape(props: ColumnShapeProps) {
+  const { x = 0, y = 0, width = 0, height = 0, fill, fillOpacity, segment, payload } = props;
 
   if (!(height > 0) || !(width > 0)) return null;
 

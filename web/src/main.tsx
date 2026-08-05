@@ -21,7 +21,12 @@ const queryClient = new QueryClient({
   },
 });
 
-createRoot(document.getElementById("root")).render(
+// #root è in index.html: se manca, la SPA non ha dove montarsi e l'unica cosa
+// utile è dirlo subito invece di far fallire createRoot con "container is null".
+const container = document.getElementById("root");
+if (!container) throw new Error("#root non trovato: index.html non è quello atteso");
+
+createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ToastProvider>

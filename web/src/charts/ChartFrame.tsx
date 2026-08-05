@@ -1,13 +1,17 @@
 import ChartLegend from "./ChartLegend";
+import type { LegendItems } from "./ChartLegend";
 import type { ReactNode } from "react";
 
 interface ChartFrameProps {
   title: string;
-  subtitle?: any;
-  legend?: any;
-  badges?: any;
-  note?: any;
-  table?: any;
+  subtitle?: ReactNode;
+  /** Voci per ChartLegend; ometti con una serie sola. */
+  legend?: LegendItems;
+  badges?: ReactNode;
+  note?: ReactNode;
+  /** Contenuto della vista tabellare. */
+  table?: ReactNode;
+  /** Tiene il render precedente a opacità ridotta. */
   refetching?: boolean;
   children?: ReactNode;
 }
@@ -21,16 +25,6 @@ interface ChartFrameProps {
 // Nessuna altezza fissa che escluda la fascia dell'asse x: il contenitore cresce
 // col contenuto, così la card non sviluppa uno scroll verticale annidato.
 
-/**
- * @param {object} props
- * @param {string} props.title
- * @param {string} [props.subtitle]
- * @param {Array} [props.legend] voci per ChartLegend; ometti con una serie sola
- * @param {import("react").ReactNode} [props.badges]
- * @param {import("react").ReactNode} [props.note]
- * @param {import("react").ReactNode} [props.table] contenuto della vista tabellare
- * @param {boolean} [props.refetching] tiene il render precedente a opacità ridotta
- */
 export default function ChartFrame({
   title,
   subtitle,

@@ -1,11 +1,12 @@
 import { Link } from "react-router-dom";
 import StaleBadge from "./StaleBadge";
 import { DASH, date, money, num, pct, qty, signedMoney, signedPct, toneOf } from "../format";
+import type { PositionRow, Warning } from "../types";
 
 interface PositionsTableProps {
-  items?: any;
+  items?: PositionRow[];
   baseCcy?: string;
-  asOf?: any;
+  asOf?: string | null;
 }
 
 
@@ -21,7 +22,9 @@ interface PositionsTableProps {
 // involucro, le plusvalenze da ETF non compensano le minus da redditi diversi e
 // il rateo cedolare è reddito, non capital gain (docs/decisions.md §3).
 
-const WARNING_LABELS = {
+// Come in WarningsBanner: la chiave arriva dal server, quindi un codice non
+// previsto qui degrada nel proprio codice invece di essere un errore di tipo.
+const WARNING_LABELS: Record<string, string> = {
   price_missing: "prezzo mancante",
   missing_price: "prezzo mancante",
   fx_missing: "cambio mancante",
@@ -29,7 +32,7 @@ const WARNING_LABELS = {
   partial: "dati incompleti",
 };
 
-function RowWarnings({ warnings }) {
+function RowWarnings({ warnings }: { warnings?: Warning[] }) {
   if (!Array.isArray(warnings) || warnings.length === 0) return null;
   return (
     <span className="pt-rowbadges">
@@ -47,7 +50,7 @@ function RowWarnings({ warnings }) {
 }
 
 /** Quantità: per i bond si mostra il NOMINALE, che è ciò che scrive il broker. */
-function QuantityCell({ row }) {
+function QuantityCell({ row }: { row: PositionRow }) {
   const isBond = row.instrument?.quoteConvention === "PCT_OF_NOMINAL";
   if (isBond && row.nominal) {
     return (

@@ -1,9 +1,32 @@
 import { useId } from "react";
 import { hatch45 } from "./chartTheme";
 
+/**
+ * Il segno RISPECCHIA la marca della serie: rettangolo per barre e aree, tratto
+ * per le linee, rettangolo tessuto per la texture (proiettato vs confermato).
+ */
+export type LegendMark = "rect" | "line" | "texture";
+
+export interface LegendItem {
+  label: string;
+  color: string;
+  mark?: LegendMark;
+  /** `strokeDasharray`, per un tratto che in legenda deve somigliare alla linea. */
+  dash?: string;
+  note?: string;
+}
+
+/**
+ * Le voci arrivano da espressioni condizionali (`hasInvested && {...}`), quindi
+ * il tipo ammette i falsy e il componente li scarta: è più leggibile che
+ * costringere ogni chiamante a costruirsi l'array a parte.
+ */
+export type LegendItems = Array<LegendItem | false | null | undefined>;
+
 interface ChartLegendProps {
-  items?: any;
-  id: string;
+  items?: LegendItems;
+  /** Per farsi referenziare da un aria-describedby; nessuno lo fa ancora. */
+  id?: string;
 }
 
 
@@ -15,9 +38,9 @@ interface ChartLegendProps {
 // aree, tratto per le linee, tratto tratteggiato per le linee tratteggiate,
 // rettangolo tessuto per la texture.
 
-const safe = (raw) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
+const safe = (raw: string) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "");
 
-function Key({ item, uid, index }) {
+function Key({ item, uid, index }: { item: LegendItem; uid: string; index: number }) {
   const { mark = "rect", color, dash } = item;
 
   if (mark === "line") {
@@ -60,12 +83,9 @@ function Key({ item, uid, index }) {
   );
 }
 
-/**
- * @param {{items: Array<{label: string, color: string, mark?: "rect"|"line"|"texture", dash?: string, note?: string}>}} props
- */
 export default function ChartLegend({ items, id }: ChartLegendProps) {
   const uid = safe(useId());
-  const list = (items || []).filter(Boolean);
+  const list = (items || []).filter((it): it is LegendItem => Boolean(it));
   if (list.length === 0) return null;
 
   return (

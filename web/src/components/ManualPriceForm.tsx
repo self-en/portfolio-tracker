@@ -1,16 +1,24 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { put } from "../api";
+import { put, fieldErrorsOf, toFormError } from "../api";
 import { date as fmtDate, num } from "../format";
 import { useToast } from "./Toast";
 import { DecimalInput, Field, toDecimal } from "./Money";
 import Spinner from "./Spinner";
 import { today } from "./RangePicker";
-import type { Instrument } from "../types";
+import type { FormEvent } from "react";
+import type { FormError } from "../api";
+import type { Amount, Instrument, PricePoint } from "../types";
 
 interface ManualPriceFormProps {
   instrument: Instrument;
-  lastPrice?: any;
+  lastPrice?: Amount;
+}
+
+/** Il corpo di PUT /api/instruments/:id/prices. */
+interface ManualPriceBody {
+  date: string;
+  close: string;
 }
 
 
@@ -26,22 +34,23 @@ export default function ManualPriceForm({ instrument, lastPrice = null }: Manual
   const toast = useToast();
   const [priceDate, setPriceDate] = useState(() => today());
   const [close, setClose] = useState("");
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<FormError | null>(null);
 
   const isPct = instrument?.quoteConvention === "PCT_OF_NOMINAL";
 
   const save = useMutation({
-    mutationFn: (bodyObj) => put(`/instruments/${instrument.id}/prices`, bodyObj),
+    mutationFn: (bodyObj: ManualPriceBody) =>
+      put<PricePoint>(`/instruments/${instrument.id}/prices`, bodyObj),
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["instruments"] });
       queryClient.invalidateQueries({ queryKey: ["portfolio"] });
       toast.success(`Prezzo del ${fmtDate(saved.date)} salvato: ${num(saved.close, 4)}.`);
       setClose("");
     },
-    onError: (err) => setError(err),
+    onError: (err) => setError(toFormError(err)),
   });
 
-  const onSubmit = (e) => {
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     const value = toDecimal(close);
@@ -52,9 +61,7 @@ export default function ManualPriceForm({ instrument, lastPrice = null }: Manual
     save.mutate({ date: priceDate, close: value });
   };
 
-  const fieldErrors = Array.isArray(error?.details)
-    ? Object.fromEntries(error.details.filter((d) => d.field).map((d) => [d.field, d.message]))
-    : {};
+  const fieldErrors = fieldErrorsOf(error);
 
   return (
     <form className="manual-price" onSubmit={onSubmit} noValidate>

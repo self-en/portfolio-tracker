@@ -55,6 +55,53 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Un errore di validazione per campo, come lo manda `src/http/validate.ts`:
+ * `details` è l'ELENCO di questi quando il codice è `validation_error`.
+ */
+export interface FieldIssue {
+  field: string;
+  message: string;
+  code?: string;
+}
+
+/**
+ * L'errore che un form ha in mano: quello del server, oppure uno costruito in
+ * locale prima di inviare ("servono la data e il prezzo"). I form ne mostrano
+ * solo `message` e i campi, quindi questo è tutto ciò che serve dichiarare.
+ */
+export interface FormError {
+  message: string;
+  code?: string;
+  details?: unknown;
+}
+
+/** Un errore qualsiasi nella forma che i form sanno mostrare. */
+export function toFormError(err: unknown): FormError {
+  if (err instanceof ApiError) {
+    return { message: err.message, code: err.code, details: err.details };
+  }
+  if (err instanceof Error) return { message: err.message };
+  return { message: String(err) };
+}
+
+/**
+ * Gli errori per campo estratti da `details`, pronti da passare a `<Field error>`.
+ *
+ * `details` è un elenco di campi SOLO per validation_error: per un conflict è un
+ * oggetto (l'entità che esiste già), quindi il controllo su Array è la
+ * discriminante, non una precauzione.
+ */
+export function fieldErrorsOf(error: FormError | null | undefined): Record<string, string> {
+  const details = error?.details;
+  if (!Array.isArray(details)) return {};
+  const out: Record<string, string> = {};
+  for (const d of details as FieldIssue[]) {
+    if (d?.field) out[d.field] = d.message;
+  }
+  return out;
+}
+
 // Messaggi che sostituiscono quelli del server perché devono dire all'utente
 // cosa FARE, non solo cosa è andato storto.
 const CLIENT_MESSAGES: Record<string, string> = {

@@ -12,13 +12,25 @@ import Money from "../components/Money";
 import Spinner from "../components/Spinner";
 import TransactionForm from "../components/TransactionForm";
 import { useToast } from "../components/Toast";
+import type { Column } from "../components/DataTable";
+import type { MovementsFilter } from "../components/FilterBar";
+import type { InstrumentsResponse, Transaction, TransactionsPage } from "../types";
 
 const PAGE_SIZE = 50;
 
-const EMPTY_FILTERS = { types: [], instrumentId: null, from: null, to: null, q: "" };
+const EMPTY_FILTERS: MovementsFilter = {
+  types: [],
+  instrumentId: null,
+  from: null,
+  to: null,
+  q: "",
+};
+
+/** Cosa sta facendo il drawer: creare un movimento, o modificarne uno esistente. */
+type DrawerState = { mode: "create" } | { mode: "edit"; tx: Transaction };
 
 /** Ricerca testuale locale: l'API dei movimenti non ha un parametro di testo libero. */
-function matchesQuery(tx, q) {
+function matchesQuery(tx: Transaction, q: string): boolean {
   if (!q) return true;
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
@@ -41,13 +53,14 @@ export default function Movements() {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [drawer, setDrawer] = useState(null); // null | {mode:'create'} | {mode:'edit', tx}
-  const [pendingDelete, setPendingDelete] = useState(null);
+  const [filters, setFilters] = useState<MovementsFilter>(EMPTY_FILTERS);
+  const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
 
   const instrumentsQuery = useQuery({
     queryKey: ["instruments", { active: "true" }],
-    queryFn: ({ signal }) => get("/instruments", { query: { active: "true" }, signal }),
+    queryFn: ({ signal }) =>
+      get<InstrumentsResponse>("/instruments", { query: { active: "true" }, signal }),
   });
 
   const listParams = useMemo(
@@ -69,8 +82,11 @@ export default function Movements() {
     // l'inserimento di un movimento durante lo scroll farebbe ricomparire o saltare
     // righe già viste.
     queryFn: ({ pageParam, signal }) =>
-      get("/transactions", { query: { ...listParams, cursor: pageParam || undefined }, signal }),
-    initialPageParam: null,
+      get<TransactionsPage>("/transactions", {
+        query: { ...listParams, cursor: pageParam || undefined },
+        signal,
+      }),
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
   });
 
@@ -86,7 +102,7 @@ export default function Movements() {
 
   // Sentinella per lo scroll infinito. Il bottone "Carica altri" resta comunque
   // visibile: l'IntersectionObserver non scatta se la finestra non scorre.
-  const sentinel = useRef(null);
+  const sentinel = useRef<HTMLSpanElement>(null);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
   useEffect(() => {
     const node = sentinel.current;
@@ -102,7 +118,7 @@ export default function Movements() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const remove = useMutation({
-    mutationFn: (id) => del(`/transactions/${id}`),
+    mutationFn: (id: number) => del(`/transactions/${id}`),
     onSuccess: () => {
       for (const key of [["portfolio"], ["transactions"], ["calendar"]]) {
         queryClient.invalidateQueries({ queryKey: key });
@@ -121,7 +137,7 @@ export default function Movements() {
     setDrawer(null);
   }, [toast]);
 
-  const columns = useMemo(
+  const columns = useMemo<Array<Column<Transaction>>>(
     () => [
       {
         key: "tradeDate",
@@ -328,7 +344,7 @@ export default function Movements() {
         confirmLabel="Elimina definitivamente"
         danger
         busy={remove.isPending}
-        onConfirm={() => remove.mutate(pendingDelete.id)}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
         onCancel={() => setPendingDelete(null)}
       />
     </>

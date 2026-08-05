@@ -1,37 +1,37 @@
 import { money, signedMoney, toneOf, DASH } from "../format";
-import type { ReactNode } from "react";
+import type { InputHTMLAttributes, ReactNode } from "react";
+import type { Formattable } from "../format";
 
 interface MoneyProps {
-  value: string | null;
+  value: Formattable;
   ccy?: string;
   withSign?: boolean;
   tone?: boolean;
-  className: string;
+  className?: string;
 }
 
 interface FieldProps {
   label: ReactNode;
-  hint: ReactNode;
-  error: ReactNode;
+  hint?: ReactNode;
+  error?: ReactNode;
   required?: boolean;
   children?: ReactNode;
   wide?: boolean;
 }
 
-interface DecimalInputProps {
-  value: string | null;
-  onChange?: (...args: any[]) => void;
-  placeholder: string;
-  disabled: boolean;
-  readOnly: boolean;
-  id: string;
-  /** Attributi passati al nodo sottostante. */
-  [key: string]: any;
+/**
+ * Le props del campo decimale: `onChange` riceve la STRINGA digitata, non un
+ * evento, perché è la stringa che l'app conserva. Il resto passa all'`<input>`.
+ */
+interface DecimalInputProps
+  extends Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> {
+  value: string | null | undefined;
+  onChange?: (value: string) => void;
 }
 
 interface ReadOnlyValueProps {
   children?: ReactNode;
-  title: string;
+  title?: string;
 }
 
 
@@ -90,7 +90,7 @@ export function DecimalInput({ value, onChange, placeholder, disabled, readOnly,
       placeholder={placeholder}
       disabled={disabled}
       readOnly={readOnly}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange?.(e.target.value)}
       {...rest}
     />
   );
@@ -109,9 +109,10 @@ export function ReadOnlyValue({ children, title }: ReadOnlyValueProps) {
  * Normalizza ciò che l'utente digita nella forma che il server valida
  * (`/^-?\d{1,20}(\.\d{1,12})?$/`): virgola italiana → punto, spazi via,
  * ",5" → "0.5". È una riscrittura di caratteri, non una conversione numerica.
- * @returns {string|null} null se il campo è vuoto.
+ *
+ * null se il campo è vuoto.
  */
-export function toDecimal(input) {
+export function toDecimal(input: string | number | null | undefined): string | null {
   if (input === null || input === undefined) return null;
   let s = String(input).trim().replace(/\s/g, "").replace(",", ".");
   if (s === "" || s === "-") return null;

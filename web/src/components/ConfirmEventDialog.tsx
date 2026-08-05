@@ -3,12 +3,24 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { post } from "../api";
 import { date, money, num, qty } from "../format";
 import { useToast } from "./Toast";
-import type { CalendarEvent } from "../types";
+import { ApiError } from "../api";
+import type { FormEvent } from "react";
+import type { CalendarEvent, ConfirmEventResponse, InstrumentRef } from "../types";
 
 interface ConfirmEventDialogProps {
   event: CalendarEvent;
-  portfolioId?: any;
-  onClose?: (...args: any[]) => void;
+  portfolioId?: string | null;
+  onClose?: () => void;
+}
+
+/** Il corpo di POST /api/calendar/:id/confirm. */
+interface ConfirmBody {
+  portfolioId?: string;
+  tradeDate?: string;
+  grossAmount: string | null;
+  taxes: string;
+  fees: string;
+  note?: string;
 }
 
 
@@ -29,8 +41,15 @@ interface ConfirmEventDialogProps {
 // con arrotondamento del banchiere, esattamente come fa il server.
 // ---------------------------------------------------------------------------
 
-/** "172.50" → { sign, digits: 17250n, scale: 2 }. null se non è un decimale. */
-function parseDecimal(input) {
+/** Un decimale scomposto in cifre intere e scala: "172.50" → 17250n, scala 2. */
+interface Parsed {
+  negative: boolean;
+  digits: bigint;
+  scale: number;
+}
+
+/** "172.50" → { negative, digits: 17250n, scale: 2 }. null se non è un decimale. */
+function parseDecimal(input: string | number | null | undefined): Parsed | null {
   const s = String(input ?? "").trim();
   const m = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(s);
   if (!m || (m[2] === "" && (m[3] ?? "") === "")) return null;
@@ -42,7 +61,7 @@ function parseDecimal(input) {
   };
 }
 
-function render(scaled, dp) {
+function render(scaled: bigint, dp: number): string {
   const negative = scaled < 0n;
   const abs = (negative ? -scaled : scaled).toString().padStart(dp + 1, "0");
   const int = abs.slice(0, abs.length - dp);
@@ -51,7 +70,7 @@ function render(scaled, dp) {
 }
 
 /** Riscala a 2 decimali con ROUND_HALF_EVEN, come il denaro sul server. */
-function toCents(scaled, scale) {
+function toCents(scaled: bigint, scale: number): bigint {
   if (scale <= 2) return scaled * 10n ** BigInt(2 - scale);
   const divisor = 10n ** BigInt(scale - 2);
   const q = scaled / divisor;
@@ -63,10 +82,13 @@ function toCents(scaled, scale) {
   return q + (scaled < 0n ? -bump : bump);
 }
 
-const signed = (p) => (p.negative ? -p.digits : p.digits);
+const signed = (p: Parsed) => (p.negative ? -p.digits : p.digits);
 
 /** `amount` × `ratePercent`% → stringa a 2 decimali. null su input non validi. */
-export function percentOf(amount, ratePercent) {
+export function percentOf(
+  amount: string | number | null | undefined,
+  ratePercent: string | number | null | undefined
+): string | null {
   const a = parseDecimal(amount);
   const r = parseDecimal(ratePercent);
   if (!a || !r) return null;
@@ -74,17 +96,22 @@ export function percentOf(amount, ratePercent) {
 }
 
 /** `a` − `b` − `c` → stringa a 2 decimali. null su input non validi. */
-export function subtract(a, b, c = "0") {
+export function subtract(
+  a: string | number | null | undefined,
+  b: string | number | null | undefined,
+  c: string | number | null | undefined = "0"
+): string | null {
   const pa = parseDecimal(a);
   const pb = parseDecimal(b);
   const pc = parseDecimal(c);
   if (!pa || !pb || !pc) return null;
   const scale = Math.max(pa.scale, pb.scale, pc.scale);
-  const lift = (p) => signed(p) * 10n ** BigInt(scale - p.scale);
+  const lift = (p: Parsed) => signed(p) * 10n ** BigInt(scale - p.scale);
   return render(toCents(lift(pa) - lift(pb) - lift(pc), scale), 2);
 }
 
-const isNegative = (value) => String(value ?? "").trim().startsWith("-");
+const isNegative = (value: string | null | undefined) =>
+  String(value ?? "").trim().startsWith("-");
 
 // ---------------------------------------------------------------------------
 // Aliquote suggerite
@@ -98,14 +125,14 @@ const RATE_OTHER = "26";
 // deduce dal nome e dall'ISIN e resta modificabile con un click.
 const GOVT_NAME = /\b(btp|bot|cct|ctz|bund|oat|bono|gilt|treasury|obbligazioni? di stato|titol[oi] di stato)\b/i;
 
-function looksGovernment(instrument) {
+function looksGovernment(instrument: InstrumentRef | null | undefined): boolean {
   if (!instrument) return false;
   const name = String(instrument.name || "");
   if (GOVT_NAME.test(name)) return true;
   return /italia/i.test(name) && /\bbtp\b/i.test(name);
 }
 
-const KIND_TITLES = {
+const KIND_TITLES: Record<string, string> = {
   COUPON: "Conferma la cedola incassata",
   DIVIDEND: "Conferma il dividendo incassato",
   REDEMPTION: "Rimborso a scadenza",
@@ -116,8 +143,8 @@ const KIND_TITLES = {
 export default function ConfirmEventDialog({ event, portfolioId, onClose }: ConfirmEventDialogProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const cardRef = useRef(null);
-  const firstFieldRef = useRef(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const suggestedRate = looksGovernment(event?.instrument) ? RATE_GOVT : RATE_OTHER;
 
@@ -127,22 +154,24 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
   const [taxes, setTaxes] = useState(() => percentOf(event?.estimatedGross ?? "0", suggestedRate) ?? "0");
   const [fees, setFees] = useState("0");
   const [note, setNote] = useState("");
-  const [serverError, setServerError] = useState(null);
+  // ApiError perché ciò che serve qui è lo status (409 = evento già confermato) e
+  // i `details` con l'hint su come procedere.
+  const [serverError, setServerError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     firstFieldRef.current?.focus();
   }, []);
 
   useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") onClose();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose?.();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
   /** Cambiando aliquota (o lordo) la ritenuta si ricalcola, ma resta editabile. */
-  const applyRate = (nextRate, nextGross = gross) => {
+  const applyRate = (nextRate: string, nextGross: string | null = gross) => {
     setRate(nextRate);
     if (nextRate === "custom") return;
     const computed = percentOf(nextGross, nextRate);
@@ -152,8 +181,8 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
   const net = useMemo(() => subtract(gross || "0", taxes || "0", fees || "0"), [gross, taxes, fees]);
   const netIsNegative = isNegative(net);
 
-  const mutation = useMutation({
-    mutationFn: (body) => post(`/calendar/${event.id}/confirm`, body),
+  const mutation = useMutation<ConfirmEventResponse, ApiError, ConfirmBody>({
+    mutationFn: (body) => post<ConfirmEventResponse>(`/calendar/${event.id}/confirm`, body),
     onSuccess: () => {
       // Il movimento appena creato cambia posizioni, KPI, rendimenti, elenco
       // movimenti e stato dell'evento: si invalidano i tre prefissi interi
@@ -162,12 +191,12 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
       queryClient.invalidateQueries({ queryKey: ["portfolio"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       toast.success("Incasso registrato: il movimento è stato creato.");
-      onClose();
+      onClose?.();
     },
     onError: (error) => setServerError(error),
   });
 
-  const submit = (e) => {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setServerError(null);
     mutation.mutate({
@@ -184,14 +213,20 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
 
   const isRedemption = event.kind === "REDEMPTION";
   const conflict = serverError?.status === 409;
-  const hint = serverError?.details?.hint;
+  // Su questa route `details` è un oggetto (hint, transactionId), non l'elenco
+  // dei campi che manda un validation_error.
+  const details = (serverError?.details ?? null) as {
+    hint?: string;
+    transactionId?: number;
+  } | null;
+  const hint = details?.hint;
 
   return (
     <div
       className="pt-dialog-backdrop"
       // Il click fuori chiude; il mousedown sulla card non deve propagare.
       onMouseDown={(e) => {
-        if (!cardRef.current?.contains(e.target)) onClose();
+        if (!cardRef.current?.contains(e.target as Node)) onClose?.();
       }}
     >
       <div
@@ -237,10 +272,9 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
         {serverError ? (
           <div className="form-error" role="alert">
             <div>{serverError.message}</div>
-            {conflict && serverError.details?.transactionId ? (
+            {conflict && details?.transactionId ? (
               <div className="small">
-                Movimento già collegato: #{serverError.details.transactionId}. Ricarica la pagina
-                per vederlo.
+                Movimento già collegato: #{details.transactionId}. Ricarica la pagina per vederlo.
               </div>
             ) : null}
             {hint ? <div className="small">Come procedere: {hint}</div> : null}
