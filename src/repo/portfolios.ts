@@ -63,4 +63,13 @@ async function remove(id: number): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
-export { list, byId, first, create, update, remove };
+/** Quante transazioni referenziano il portafoglio (per il 409 su DELETE). */
+async function transactionCount(id: number): Promise<number> {
+  const { rows: r } = await query(
+    "SELECT COUNT(*)::int AS n FROM transactions WHERE portfolio_id = $1",
+    [id]
+  );
+  return Number(r[0].n);
+}
+
+export { list, byId, first, create, update, remove, transactionCount };

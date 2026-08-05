@@ -31,6 +31,25 @@ const router: FastifyPluginAsync = async (app) => {
     if (!updated) throw notFound("portafoglio non trovato");
     return reply.send(updated);
   });
+
+  app.delete("/:id", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
+    const id = req.valid.params.id;
+    const existing = await portfoliosRepo.byId(id);
+    if (!existing) throw notFound("portafoglio non trovato");
+
+    // 409 e non una cancellazione a cascata: perdere movimenti per un click è
+    // irreparabile in un'app a inserimento manuale (stesso criterio di /instruments).
+    const n = await portfoliosRepo.transactionCount(id);
+    if (n > 0) {
+      throw conflict(
+        `il portafoglio ha ${n} movimenti collegati: elimina prima i movimenti`,
+        { transactionCount: n }
+      );
+    }
+
+    await portfoliosRepo.remove(id);
+    return reply.code(204).send();
+  });
 };
 
 export { router };
