@@ -26,3 +26,18 @@ process.env.PGHOST = "memdb";
 
 // Nessun test vuole il cron: partirebbe in mezzo alle asserzioni.
 process.env.SCHEDULER_ENABLED = "false";
+
+// NESSUNA RETE dai test. Il default è "yahoo", e non basta spegnere lo scheduler:
+// `POST /api/instruments` chiama `enqueueBackfill`, che accoda un job ASINCRONO
+// non governato da SCHEDULER_ENABLED. Con il provider yahoo quel job scarica i
+// prezzi VERI e li scrive in `prices_daily` mentre il test sta già asserendo,
+// sovrascrivendo i prezzi finti del fixture.
+//
+// È il bug che ha fatto fallire la CI a intermittenza: un run ha valorizzato
+// l'ETF a 126,13675 (prezzo reale di EUNL.DE) invece dei 125 del fixture, e la
+// serie del valore è finita a 26.861,41 invece di 26.725,00 — 120 × 126,13675.
+// Passava o falliva secondo chi vinceva la corsa, e in locale non si vedeva.
+// `manual` è il provider vuoto: nessuna chiamata di rete.
+// Assegnato SENZA fallback su un valore esterno: un `||=` lascerebbe a un
+// MARKET_PROVIDER nell'ambiente il potere di rimettere la rete in mezzo ai test.
+process.env.MARKET_PROVIDER = "manual";
