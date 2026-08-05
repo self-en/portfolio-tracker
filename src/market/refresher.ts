@@ -20,17 +20,32 @@ import * as refreshLog from "../repo/refreshLog";
 import { createProvider } from "./provider";
 import { createFxProvider } from "./fxProvider";
 import { errMessage } from "../util/err";
+import type { DateString } from "../types";
 
-const queue = [];
+/** Un job in coda. `kind` decide quale funzione lo esegue (vedi runJob). */
+export interface RefreshJob {
+  kind: string;
+  id?: string;
+  instrumentId?: number;
+  from?: DateString;
+  quotes?: string[];
+}
+
+const queue: RefreshJob[] = [];
 let running = false;
 let jobSeq = 0;
-const stats = { enqueued: 0, done: 0, failed: 0, lastError: null };
+const stats: { enqueued: number; done: number; failed: number; lastError: string | null } = {
+  enqueued: 0,
+  done: 0,
+  failed: 0,
+  lastError: null,
+};
 
 /** 'YYYY-MM-DD' di oggi in UTC. Il tempo entra nel sistema QUI, non in domain/. */
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const today = (): DateString => new Date().toISOString().slice(0, 10);
+const daysAgo = (n: number): DateString => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 
-function enqueue(job) {
+function enqueue(job: RefreshJob): string {
   jobSeq += 1;
   const id = `${job.kind}-${jobSeq}`;
   // Deduplica: riaccodare lo stesso strumento due volte è spreco puro.
@@ -50,7 +65,7 @@ async function drain() {
   running = true;
   try {
     while (queue.length > 0) {
-      const job = queue.shift();
+      const job = queue.shift() as RefreshJob;
       try {
         await runJob(job);
         stats.done += 1;
@@ -69,7 +84,7 @@ async function drain() {
   }
 }
 
-async function runJob(job) {
+async function runJob(job: RefreshJob): Promise<void> {
   switch (job.kind) {
     case "backfill":
       return backfillInstrument(job.instrumentId, job);
@@ -94,7 +109,7 @@ async function runJob(job) {
  * Si estende all'indietro fino alla prima transazione, perché una serie che parte
  * dopo il primo acquisto produce un buco proprio all'inizio del grafico.
  */
-async function backfillInstrument(instrumentId, opts = {}) {
+async function backfillInstrument(instrumentId: number, opts: { from?: DateString } = {}): Promise<void> {
   const inst = await instrumentsRepo.byId(instrumentId);
   if (!inst) return;
   if (inst.priceSource === "manual" || !inst.ticker) {
@@ -270,7 +285,7 @@ async function refreshDailyCloses() {
   }
 }
 
-async function refreshFx(opts = {}) {
+async function refreshFx(opts: { quotes?: string[]; from?: DateString } = {}) {
   const logId = await refreshLog.start("fx", (opts.quotes || []).join(",") || "in-uso");
   try {
     let quotes = opts.quotes;
@@ -369,10 +384,10 @@ async function reconcile() {
 
 // --- API pubblica ---
 
-const enqueueBackfill = (instrumentId, opts = {}) =>
+const enqueueBackfill = (instrumentId: number, opts: { from?: DateString } = {}): string =>
   enqueue({ kind: "backfill", instrumentId, ...opts });
 
-function enqueueScope(scope) {
+function enqueueScope(scope: string): string[] {
   switch (scope) {
     case "quotes":
       return enqueue({ kind: "quotes" });

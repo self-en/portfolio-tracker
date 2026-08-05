@@ -183,11 +183,11 @@ function buildPositions(txs: readonly TxLike[], opts: BuildPositionsOptions = {}
 
   const warnings = [];
   const positions = new Map();
-  const cash = {}; // saldo per valuta, ricavato gratis dal ledger
+  const cash: Record<string, Decimal> = {}; // saldo per valuta, ricavato gratis dal ledger
   const flows = []; // {date, amountBase} flussi esterni per TWR/XIRR
 
   const ordered = sortLedger(txs.map(normalizeTx)).filter(
-    (tx) => !asOf || cal.cmp(tx.tradeDate, asOf) <= 0
+    (tx) => !asOf || cal.cmp(tx.tradeDate ?? "", asOf) <= 0
   );
 
   for (const tx of ordered) {
@@ -388,7 +388,7 @@ function splitAdjustedQuantitySeries(
   let appliedSplitProduct = ONE; // prodotto degli split GIÀ avvenuti
 
   for (const day of dates) {
-    while (i < ordered.length && cal.cmp(ordered[i].tradeDate, day) <= 0) {
+    while (i < ordered.length && cal.cmp(ordered[i].tradeDate ?? "", day) <= 0) {
       const tx = ordered[i];
       if (tx.type === "BUY") raw = raw.plus(d(tx.quantity));
       else if (tx.type === "SELL") {
@@ -433,7 +433,7 @@ function costSeries(
   let cost = ZERO;
 
   for (const day of dates) {
-    while (i < ordered.length && cal.cmp(ordered[i].tradeDate, day) <= 0) {
+    while (i < ordered.length && cal.cmp(ordered[i].tradeDate ?? "", day) <= 0) {
       const tx = ordered[i];
       const rate = resolveFx(tx, baseCcy, fxLookup, sink);
       const inst = tx.instrumentId != null ? instruments.get(Number(tx.instrumentId)) : null;
@@ -474,7 +474,7 @@ function valuePosition(
   instrument: InstrumentLike | null | undefined,
   marketPrice: Numeric,
   fxRate: Numeric,
-  opts: { partial?: boolean } = {}
+  opts: { partial?: boolean; previousClose?: Numeric } = {}
 ) {
   const rate = d(fxRate, 1);
   const price = isBlank(marketPrice) ? null : d(marketPrice);
@@ -486,7 +486,7 @@ function valuePosition(
   const unrealizedPct =
     marketValueBase === null || position.costBasis.isZero()
       ? null
-      : unrealized.div(position.costBasis);
+      : unrealized!.div(position.costBasis);
 
   const avgCost = position.quantity.isZero() ? ZERO : position.costBasis.div(position.quantity);
 

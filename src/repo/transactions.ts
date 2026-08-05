@@ -1,6 +1,26 @@
 import { query } from "../db/pool";
 import * as rows from "./rows";
 import { normalizeDate } from "../domain/calendar";
+import type { PoolClient } from "pg";
+import type { DateString, Transaction } from "../types";
+
+export interface ListFilter extends LedgerFilter {
+  type?: string;
+  from?: DateString;
+  to?: DateString;
+  limit?: number;
+  /** Cursore keyset opaco restituito dalla pagina precedente. */
+  cursor?: string | null;
+}
+
+export interface LedgerFilter {
+  portfolioId?: number | null;
+  instrumentId?: number | null;
+  asOf?: DateString;
+}
+
+/** Una transazione in scrittura: come il modello, senza id e timestamp. */
+export type TransactionInput = Omit<Transaction, "id" | "createdAt" | "updatedAt">;
 
 const COLS = `id, portfolio_id, instrument_id, type, trade_date, settle_date, quantity,
   price, gross_amount, fees, taxes, accrued_interest, net_amount, trade_ccy, fx_rate,
@@ -10,10 +30,10 @@ const COLS = `id, portfolio_id, instrument_id, type, trade_date, settle_date, qu
  * Cursore di paginazione keyset su (trade_date, id).
  * Opaco per il client, ma leggibile in debug: è base64url di JSON, non un blob.
  */
-const encodeCursor = (row) =>
+const encodeCursor = (row: { tradeDate: DateString; id: number }): string =>
   Buffer.from(JSON.stringify({ d: row.tradeDate, i: row.id })).toString("base64url");
 
-function decodeCursor(cursor) {
+function decodeCursor(cursor: string | null | undefined) {
   if (!cursor) return null;
   try {
     const o = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
@@ -39,9 +59,9 @@ async function list({
   to,
   limit = 50,
   cursor,
-} = {}) {
-  const where = [];
-  const params = [];
+}: ListFilter = {}) {
+  const where: string[] = [];
+  const params: unknown[] = [];
 
   if (portfolioId) {
     params.push(portfolioId);
@@ -114,14 +134,17 @@ async function list({
 
   return {
     items,
-    nextCursor: hasMore && items.length ? encodeCursor(items[items.length - 1]) : null,
+    nextCursor:
+      hasMore && items.length
+        ? encodeCursor(items[items.length - 1] as { tradeDate: DateString; id: number })
+        : null,
   };
 }
 
 /** TUTTE le transazioni di un portafoglio, ordine ASCENDENTE: l'input di domain/. */
-async function ledger({ portfolioId, instrumentId, asOf } = {}) {
-  const where = [];
-  const params = [];
+async function ledger({ portfolioId, instrumentId, asOf }: LedgerFilter = {}) {
+  const where: string[] = [];
+  const params: unknown[] = [];
   if (portfolioId) {
     params.push(portfolioId);
     where.push(`portfolio_id = $${params.length}`);
@@ -140,27 +163,31 @@ async function ledger({ portfolioId, instrumentId, asOf } = {}) {
       ORDER BY trade_date ASC, id ASC`,
     params
   );
-  return r.map(rows.transaction);
+  return rows.mapAll(r, rows.transaction);
 }
 
 /** Ledger raggruppato per strumento: la forma che valueSeries() si aspetta. */
-async function ledgerByInstrument(args) {
+async function ledgerByInstrument(args: LedgerFilter) {
   const all = await ledger(args);
-  const map = new Map();
+  const map = new Map<number, Transaction[]>();
   for (const tx of all) {
-    if (tx.instrumentId == null) continue;
-    if (!map.has(tx.instrumentId)) map.set(tx.instrumentId, []);
-    map.get(tx.instrumentId).push(tx);
+    if (!tx || tx.instrumentId == null) continue;
+    let list_ = map.get(tx.instrumentId);
+    if (!list_) {
+      list_ = [];
+      map.set(tx.instrumentId, list_);
+    }
+    list_.push(tx);
   }
   return map;
 }
 
-async function byId(id) {
+async function byId(id: number) {
   const { rows: r } = await query(`SELECT ${COLS} FROM transactions WHERE id = $1`, [id]);
   return rows.transaction(r[0]);
 }
 
-const FIELDS = [
+const FIELDS: Array<[keyof TransactionInput, string]> = [
   ["portfolioId", "portfolio_id"],
   ["instrumentId", "instrument_id"],
   ["type", "type"],
@@ -180,10 +207,10 @@ const FIELDS = [
   ["externalRef", "external_ref"],
 ];
 
-async function create(input, client = null) {
+async function create(input: TransactionInput, client: PoolClient | null = null) {
   const q = client ? client.query.bind(client) : query;
   const cols = [];
-  const params = [];
+  const params: unknown[] = [];
   const placeholders = [];
   for (const [key, col] of FIELDS) {
     if (input[key] === undefined) continue;
@@ -199,9 +226,9 @@ async function create(input, client = null) {
   return rows.transaction(r[0]);
 }
 
-async function update(id, patch) {
-  const sets = [];
-  const params = [];
+async function update(id: number, patch: Partial<TransactionInput>) {
+  const sets: string[] = [];
+  const params: unknown[] = [];
   for (const [key, col] of FIELDS) {
     if (patch[key] === undefined) continue;
     params.push(patch[key] === "" ? null : patch[key]);
@@ -217,13 +244,13 @@ async function update(id, patch) {
   return rows.transaction(r[0]);
 }
 
-async function remove(id) {
+async function remove(id: number): Promise<boolean> {
   const { rowCount } = await query("DELETE FROM transactions WHERE id = $1", [id]);
   return (rowCount ?? 0) > 0;
 }
 
 /** Prima data di transazione: origine della griglia della serie storica. */
-async function earliestDate(portfolioId) {
+async function earliestDate(portfolioId?: number | null) {
   const { rows: r } = await query(
     `SELECT MIN(trade_date) AS d FROM transactions ${portfolioId ? "WHERE portfolio_id = $1" : ""}`,
     portfolioId ? [portfolioId] : []
@@ -232,7 +259,7 @@ async function earliestDate(portfolioId) {
 }
 
 /** Prima data per strumento: quanto indietro deve andare il backfill dei prezzi. */
-async function earliestDateByInstrument(instrumentId) {
+async function earliestDateByInstrument(instrumentId: number) {
   const { rows: r } = await query(
     "SELECT MIN(trade_date) AS d FROM transactions WHERE instrument_id = $1",
     [instrumentId]
@@ -241,8 +268,18 @@ async function earliestDateByInstrument(instrumentId) {
 }
 
 /** Redditi aggregati per periodo, lordo/ritenuta/netto separati. */
-async function incomeByPeriod({ portfolioId, from, to, groupBy = "month" }) {
-  const params = [];
+async function incomeByPeriod({
+  portfolioId,
+  from,
+  to,
+  groupBy = "month",
+}: {
+  portfolioId?: number | null;
+  from?: DateString;
+  to?: DateString;
+  groupBy?: "month" | "instrument";
+}) {
+  const params: unknown[] = [];
   const where = [`t.type IN ('DIVIDEND','COUPON','INTEREST')`];
   if (portfolioId) {
     params.push(portfolioId);

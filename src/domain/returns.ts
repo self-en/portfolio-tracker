@@ -1,6 +1,10 @@
 // Metriche di rendimento. Puro: date come stringhe, nessun Date.now().
 import { D, d, ZERO, ONE, isBlank } from "./money";
 import * as cal from "./calendar";
+import type Decimal from "decimal.js";
+import type { Numeric } from "./money";
+import type { DateString } from "../types";
+import type { CashFlow, DayFlow, SeriesPoint } from "./types";
 
 const DAYS_PER_YEAR = 365;
 
@@ -12,7 +16,7 @@ const DAYS_PER_YEAR = 365;
  * principale.
  * @returns {string|null}
  */
-function simpleReturn(value, netInvested) {
+function simpleReturn(value: Numeric, netInvested: Numeric) {
   const ni = d(netInvested);
   if (ni.isZero()) return null;
   return d(value).minus(ni).div(ni).toDecimalPlaces(8, D.ROUND_HALF_EVEN).toFixed();
@@ -33,8 +37,8 @@ function simpleReturn(value, netInvested) {
  * @param {Map<string, any>|Object} flowsByDate flusso netto ENTRANTE per data
  * @returns {{total: string|null, annualized: string|null, days: number, segments: number}}
  */
-function twr(points, flowsByDate = new Map()) {
-  const getFlow = (date) => {
+function twr(points: readonly SeriesPoint[] | null | undefined, flowsByDate: Map<DateString, Numeric> = new Map()) {
+  const getFlow = (date: DateString) => {
     const v = flowsByDate instanceof Map ? flowsByDate.get(date) : flowsByDate[date];
     return isBlank(v) ? ZERO : d(v);
   };
@@ -96,7 +100,7 @@ function twr(points, flowsByDate = new Map()) {
  * @param {Array<{date: string, amountBase: any}>} flows
  * @returns {Map<string, Decimal>}
  */
-function aggregateFlows(flows) {
+function aggregateFlows(flows: readonly CashFlow[] | null | undefined) {
   const map = new Map();
   for (const f of flows || []) {
     const date = cal.normalizeDate(f.date);
@@ -110,7 +114,7 @@ function aggregateFlows(flows) {
  * Flusso ENTRANTE per data, a partire dai net_amount (che hanno il segno del
  * flusso di cassa dell'INVESTITORE: BUY negativo). Entrante = -net_amount.
  */
-function inflowsByDate(flows) {
+function inflowsByDate(flows: readonly CashFlow[] | null | undefined) {
   const map = new Map();
   for (const [date, amount] of aggregateFlows(flows)) map.set(date, amount.negated());
   return map;
@@ -129,7 +133,7 @@ function inflowsByDate(flows) {
 const CAPITAL_TYPES = new Set(["BUY", "SELL", "FEE", "TAX", "RETURN_OF_CAPITAL"]);
 
 /** Investito netto cumulato = -Σ net_amount sui soli flussi di CAPITALE. */
-function netInvestedSeries(flows, dates) {
+function netInvestedSeries(flows: readonly CashFlow[] | null | undefined, dates: readonly DateString[]) {
   const capital = (flows || []).filter((f) => !f.type || CAPITAL_TYPES.has(f.type));
   const byDate = aggregateFlows(capital);
   const out = [];
@@ -147,7 +151,7 @@ function netInvestedSeries(flows, dates) {
 }
 
 /** f(r) = Σ cf_i (1+r)^(-d_i/365) */
-function npv(cashflows, rate) {
+function npv(cashflows: readonly DayFlow[], rate: Numeric) {
   const base = ONE.plus(d(rate));
   let acc = ZERO;
   for (const cf of cashflows) {
@@ -158,7 +162,7 @@ function npv(cashflows, rate) {
 }
 
 /** f'(r) = Σ cf_i × (-d_i/365) × (1+r)^(-d_i/365 - 1) */
-function npvDerivative(cashflows, rate) {
+function npvDerivative(cashflows: readonly DayFlow[], rate: Numeric) {
   const base = ONE.plus(d(rate));
   let acc = ZERO;
   for (const cf of cashflows) {
@@ -187,10 +191,12 @@ const BISECT_HI = new D(10);
  * @returns {{rate: string, method: string, iterations: number}|null}
  *   null se non esiste almeno un flusso positivo E uno negativo.
  */
-function xirr(cashflows) {
+function xirr(cashflows: readonly CashFlow[] | null | undefined) {
   const flows = (cashflows || [])
     .map((c) => ({ date: cal.normalizeDate(c.date), amount: d(c.amount) }))
-    .filter((c) => c.date && !c.amount.isZero())
+    // Type guard, non un filter qualunque: dice al compilatore che da qui in giu'
+    // `date` non e' nullable (il filtro runtime era gia' questo).
+    .filter((c): c is { date: DateString; amount: Decimal } => !!c.date && !c.amount.isZero())
     .sort((a, b) => cal.cmp(a.date, b.date));
 
   if (flows.length < 2) return null;
@@ -281,16 +287,24 @@ function xirr(cashflows) {
  * XIRR di un portafoglio: flussi del ledger più il valore terminale come incasso
  * finale.
  */
-function portfolioXirr(flows, terminalValue, asOf) {
+function portfolioXirr(
+  flows: readonly CashFlow[] | null | undefined,
+  terminalValue: Numeric,
+  asOf: DateString
+) {
   const cashflows = (flows || []).map((f) => ({ date: f.date, amount: d(f.amountBase ?? f.amount) }));
   if (!isBlank(terminalValue)) {
-    cashflows.push({ date: cal.normalizeDate(asOf), amount: d(terminalValue) });
+    cashflows.push({ date: cal.normalizeDate(asOf) as DateString, amount: d(terminalValue) });
   }
   return xirr(cashflows);
 }
 
 /** Suddivide TWR e XIRR per anno civile. */
-function byYear(points, flows, opts = {}) {
+function byYear(
+  points: readonly SeriesPoint[] | null | undefined,
+  flows: readonly CashFlow[] | null | undefined,
+  opts: { asOf?: DateString } = {}
+) {
   const inflow = inflowsByDate(flows);
   const usable = (points || []).filter((p) => !isBlank(p.value));
   if (usable.length < 2) return [];

@@ -2,10 +2,38 @@ import { query } from "../db/pool";
 import * as rows from "./rows";
 import { normalizeDate } from "../domain/calendar";
 import { inList } from "./sqlUtil";
+import type { DateString, DecimalString } from "../types";
+
+export interface DateRange {
+  from?: DateString;
+  to?: DateString;
+}
+
+/** Una barra giornaliera come la normalizza il provider (numerici come stringa). */
+export interface BarInput {
+  date: DateString;
+  open?: DecimalString | null;
+  high?: DecimalString | null;
+  low?: DecimalString | null;
+  close: DecimalString;
+  adjClose?: DecimalString | null;
+  volume?: DecimalString | null;
+}
+
+/** Una quotazione da scrivere in cache. */
+export interface QuoteInput {
+  instrumentId: number;
+  price: DecimalString | null;
+  currency?: string | null;
+  previousClose?: DecimalString | null;
+  marketState?: string | null;
+  quoteTime?: string | null;
+  source?: string | null;
+}
 
 /** Serie prezzi di uno strumento. Righe SPARSE: il forward-fill lo fa domain/. */
-async function series(instrumentId, { from, to } = {}) {
-  const params = [instrumentId];
+async function series(instrumentId: number, { from, to }: DateRange = {}) {
+  const params: unknown[] = [instrumentId];
   const where = ["instrument_id = $1"];
   if (from) {
     params.push(from);
@@ -20,14 +48,14 @@ async function series(instrumentId, { from, to } = {}) {
        FROM prices_daily WHERE ${where.join(" AND ")} ORDER BY price_date ASC`,
     params
   );
-  return r.map(rows.price);
+  return rows.mapAll(r, rows.price);
 }
 
 /** Serie per più strumenti in UNA query, raggruppate: evita N+1 su value-series. */
-async function seriesForMany(instrumentIds, { from, to } = {}) {
+async function seriesForMany(instrumentIds: readonly number[], { from, to }: DateRange = {}) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
-  const params = [];
+  const params: unknown[] = [];
   const where = [`instrument_id ${inList(params, instrumentIds)}`];
   if (from) {
     params.push(from);
@@ -56,10 +84,10 @@ async function seriesForMany(instrumentIds, { from, to } = {}) {
  * DISTINCT ON — è l'unico posto dove conviene, perché evita di trasferire tutta la
  * storia solo per leggerne l'ultima riga.
  */
-async function latestAsOf(instrumentIds, asOf) {
+async function latestAsOf(instrumentIds: readonly number[], asOf: DateString) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
-  const params = [];
+  const params: unknown[] = [];
   const idIn = inList(params, instrumentIds);
   params.push(asOf);
   const { rows: r } = await query(
@@ -81,10 +109,10 @@ async function latestAsOf(instrumentIds, asOf) {
 }
 
 /** Prezzo del giorno precedente a quello noto, per la variazione giornaliera. */
-async function previousCloseAsOf(instrumentIds, asOf) {
+async function previousCloseAsOf(instrumentIds: readonly number[], asOf: DateString) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
-  const params2 = [];
+  const params2: unknown[] = [];
   const idIn2 = inList(params2, instrumentIds);
   params2.push(asOf);
   const { rows: r } = await query(
@@ -107,7 +135,11 @@ async function previousCloseAsOf(instrumentIds, asOf) {
  * dato inserito a mano è l'unico che esiste, e un refresh non deve poterlo
  * cancellare. Il contrario è permesso (una correzione manuale vince).
  */
-async function upsertBars(instrumentId, bars, source = "yahoo") {
+async function upsertBars(
+  instrumentId: number,
+  bars: readonly BarInput[] | null | undefined,
+  source = "yahoo"
+): Promise<number> {
   if (!bars || bars.length === 0) return 0;
   let count = 0;
   // Batch da 500: un singolo INSERT con migliaia di tuple supera il limite di
@@ -115,7 +147,7 @@ async function upsertBars(instrumentId, bars, source = "yahoo") {
   const CHUNK = 500;
   for (let i = 0; i < bars.length; i += CHUNK) {
     const chunk = bars.slice(i, i + CHUNK);
-    const params = [];
+    const params: unknown[] = [];
     const values = chunk.map((b) => {
       params.push(
         instrumentId,
@@ -148,7 +180,7 @@ async function upsertBars(instrumentId, bars, source = "yahoo") {
 }
 
 /** Prezzo manuale: il percorso principale per le obbligazioni. */
-async function upsertManual(instrumentId, date, close) {
+async function upsertManual(instrumentId: number, date: DateString, close: DecimalString) {
   const { rows: r } = await query(
     `INSERT INTO prices_daily (instrument_id, price_date, close, source)
      VALUES ($1, $2::date, $3, 'manual')
@@ -160,7 +192,7 @@ async function upsertManual(instrumentId, date, close) {
   return rows.price(r[0]);
 }
 
-async function deleteAll(instrumentId) {
+async function deleteAll(instrumentId: number): Promise<number> {
   const { rowCount } = await query("DELETE FROM prices_daily WHERE instrument_id = $1", [
     instrumentId,
   ]);
@@ -169,7 +201,7 @@ async function deleteAll(instrumentId) {
 
 // --- quotes_latest ---
 
-async function upsertQuote(q) {
+async function upsertQuote(q: QuoteInput) {
   const { rows: r } = await query(
     `INSERT INTO quotes_latest
        (instrument_id, price, currency, previous_close, market_state, quote_time, source, fetched_at)
@@ -192,10 +224,10 @@ async function upsertQuote(q) {
   return rows.quote(r[0]);
 }
 
-async function latestQuotes(instrumentIds) {
+async function latestQuotes(instrumentIds: readonly number[]) {
   const map = new Map();
   if (!instrumentIds || instrumentIds.length === 0) return map;
-  const params = [];
+  const params: unknown[] = [];
   const { rows: r } = await query(
     `SELECT instrument_id, price, currency, previous_close, market_state, quote_time, source, fetched_at
        FROM quotes_latest WHERE instrument_id ${inList(params, instrumentIds)}`,

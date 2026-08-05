@@ -15,14 +15,24 @@ import { Leadership, SCHEDULER_LOCK_KEY } from "../db/leader";
 import * as refreshLog from "../repo/refreshLog";
 import * as refresher from "./refresher";
 import { errMessage } from "../util/err";
+/** Il pezzo di stato del boot che lo scheduler aggiorna (src/boot.ts). */
+interface BootState {
+  scheduler: { leader: boolean; lastRuns: Record<string, unknown> };
+  [key: string]: unknown;
+}
+
+/** Un task di node-cron: ne usiamo solo stop(). */
+interface ScheduledTask {
+  stop: () => void;
+}
 
 const LEADER_RETRY_MS = 60_000;
 
 const leadership = new Leadership(SCHEDULER_LOCK_KEY, "scheduler");
 let isLeader = false;
-let tasks = [];
-let leaderTimer = null;
-let bootState = null;
+let tasks: ScheduledTask[] = [];
+let leaderTimer: NodeJS.Timeout | null = null;
+let bootState: BootState | null = null;
 
 /** Aggiorna lo stato di leadership. La meccanica del lock vive in db/leader.js. */
 async function tryBecomeLeader() {
@@ -32,7 +42,7 @@ async function tryBecomeLeader() {
 }
 
 /** Avvolge un corpo di cron: esce subito se non è leader, e non lancia mai. */
-function leaderOnly(name, fn) {
+function leaderOnly(name: string, fn: () => Promise<unknown>): () => Promise<void> {
   return async () => {
     if (!isLeader) return;
     try {
@@ -77,7 +87,7 @@ async function catchUp() {
   }
 }
 
-async function startScheduler(state) {
+async function startScheduler(state: BootState) {
   bootState = state || null;
 
   if (!config.scheduler.enabled) {

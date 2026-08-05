@@ -6,7 +6,7 @@ const COLS = "id, name, base_ccy, broker, created_at";
 
 async function list(): Promise<Array<Portfolio | null>> {
   const { rows: r } = await query(`SELECT ${COLS} FROM portfolios ORDER BY id ASC`);
-  return r.map(rows.portfolio);
+  return rows.mapAll(r, rows.portfolio);
 }
 
 async function byId(id: number): Promise<Portfolio | null> {

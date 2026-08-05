@@ -93,6 +93,14 @@ async function buildApp(): Promise<FastifyInstance> {
     );
   });
 
+  // req.valid esiste sempre, da qui: i preHandler di validazione ci mettono
+  // dentro i valori parsati e le route leggono solo da li'. Inizializzarlo qui
+  // rende vera per costruzione l'invariante dichiarata in http/fastify.d.ts,
+  // invece di spargere controlli difensivi in ogni handler.
+  app.addHook("onRequest", async (req) => {
+    req.valid = {};
+  });
+
   // Probe di readiness della piattaforma. Invariato e NON autenticato.
   // Resta 200 anche in locked mode o con il DB giù, di proposito: se restituisse
   // 503 la piattaforma ricreerebbe il pod in loop e i log diventerebbero

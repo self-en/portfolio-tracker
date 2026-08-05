@@ -7,6 +7,7 @@
 import { D, d, ZERO, isBlank } from "./money";
 import * as positions from "./positions";
 import * as bonds from "./bonds";
+import type { DomainWarning, InstrumentLike, TxLike } from "./types";
 
 /** Tipi in cui l'importo è inserito direttamente dall'utente (non derivato da qty×prezzo). */
 const AMOUNT_TYPES = new Set([
@@ -31,9 +32,9 @@ const NEGATIVE_TYPES = new Set(["BUY", "FEE", "TAX", "WITHDRAWAL"]);
  * @returns {{grossAmount, netAmount, accruedInterest, quantity, nominal, autoAccrued, warnings}}
  *   tutti i numerici come STRINGA.
  */
-function computeAmounts(input, instrument = null) {
+function computeAmounts(input: TxLike, instrument: InstrumentLike | null = null) {
   const type = input.type;
-  const warnings = [];
+  const warnings: DomainWarning[] = [];
   const fees = d(input.fees);
   const taxes = d(input.taxes);
 

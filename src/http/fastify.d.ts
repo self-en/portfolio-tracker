@@ -18,7 +18,13 @@ import "@fastify/cookie";
 
 declare module "fastify" {
   interface FastifyRequest {
-    valid?: {
+    /**
+     * Valori validati dai preHandler zod. Sempre presente (un hook in app.ts lo
+     * inizializza a {} su ogni richiesta), quindi le route non devono verificarlo;
+     * i singoli campi ci sono solo se la route ha registrato il validatore
+     * corrispondente.
+     */
+    valid: {
       body?: any;
       query?: any;
       params?: any;

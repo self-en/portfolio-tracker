@@ -4,11 +4,27 @@
 // modulo non è un fallback: è il motore che fa funzionare il calendario cedole.
 import { D, d, HUNDRED, ZERO, safeDiv } from "./money";
 import * as cal from "./calendar";
+import type Decimal from "decimal.js";
+import type { Numeric } from "./money";
+import type { DateString, DecimalString } from "../types";
+import type { InstrumentLike } from "./types";
+
+/** Un periodo cedolare dello scadenzario. */
+export interface CouponPeriod {
+  periodStart: DateString;
+  periodEnd: DateString;
+  payDate: DateString;
+  /** Confini QUASI-cedolari: sono il denominatore del rateo ACT/ACT-ICMA. */
+  quasiStart: DateString;
+  quasiEnd: DateString;
+  amountPer100: DecimalString;
+  irregular: boolean;
+}
 
 const DAY_COUNTS = ["ACT/ACT-ICMA", "30E/360", "ACT/365F", "ACT/360"];
 
 /** Mesi tra due cedole. frequency 0 (zero coupon) non ha passo. */
-const monthsPerPeriod = (frequency) => {
+const monthsPerPeriod = (frequency: number | null | undefined): number | null => {
   const f = Number(frequency);
   if (!f || f <= 0) return null;
   return 12 / f;
@@ -18,7 +34,7 @@ const monthsPerPeriod = (frequency) => {
  * Giorni secondo la convenzione 30E/360 (eurobond): ogni mese vale 30 giorni,
  * il 31 diventa 30.
  */
-function days30E360(from, to) {
+function days30E360(from: DateString, to: DateString): number {
   const y1 = Number(from.slice(0, 4));
   const m1 = Number(from.slice(5, 7));
   const y2 = Number(to.slice(0, 4));
@@ -37,8 +53,15 @@ function days30E360(from, to) {
  *
  * @returns {Decimal} frazione d'anno
  */
-function dayCountFraction(convention, start, settle, periodStart, periodEnd, frequency) {
-  const conv = DAY_COUNTS.includes(convention) ? convention : "ACT/ACT-ICMA";
+function dayCountFraction(
+  convention: string | null | undefined,
+  start: DateString,
+  settle: DateString,
+  periodStart: DateString,
+  periodEnd: DateString,
+  frequency: number | null | undefined
+): Decimal {
+  const conv = convention && DAY_COUNTS.includes(convention) ? convention : "ACT/ACT-ICMA";
 
   if (conv === "ACT/ACT-ICMA") {
     const periodDays = cal.daysBetween(periodStart, periodEnd);
@@ -69,7 +92,7 @@ function dayCountFraction(convention, start, settle, periodStart, periodEnd, fre
  * @param {string} [bond.dayCount]
  * @returns {Array<{periodStart, periodEnd, payDate, amountPer100, irregular}>}
  */
-function couponSchedule(bond) {
+function couponSchedule(bond: InstrumentLike) {
   const maturity = cal.normalizeDate(bond.maturityDate);
   if (!maturity) throw new TypeError("couponSchedule richiede maturityDate");
 
@@ -169,7 +192,7 @@ function couponSchedule(bond) {
  *
  * @returns {{accruedPer100: string, periodStart: string|null, periodEnd: string|null, days: number}}
  */
-function accruedInterest(bond, settleDate) {
+function accruedInterest(bond: InstrumentLike, settleDate: DateString) {
   const settle = cal.normalizeDate(settleDate);
   const empty = { accruedPer100: "0", periodStart: null, periodEnd: null, days: 0 };
   if (!settle) return empty;
@@ -177,7 +200,7 @@ function accruedInterest(bond, settleDate) {
   const frequency = Number(bond.couponFrequency);
   if (!frequency) return empty; // zero coupon: nessun rateo
 
-  const schedule = bond.schedule || couponSchedule(bond);
+  const schedule = (bond.schedule as CouponPeriod[] | undefined) || couponSchedule(bond);
   if (!schedule.length) return empty;
 
   // Il periodo che CONTIENE settleDate: [periodStart, payDate). Estremo destro
@@ -216,7 +239,7 @@ function accruedInterest(bond, settleDate) {
  * Eventi futuri per il calendario: una voce per cedola più il rimborso a
  * scadenza. `fromDate` filtra le cedole già passate.
  */
-function projectedEvents(bond, fromDate = null) {
+function projectedEvents(bond: InstrumentLike, fromDate: DateString | null = null) {
   const from = cal.normalizeDate(fromDate);
   const maturity = cal.normalizeDate(bond.maturityDate);
   const events = [];
@@ -250,7 +273,7 @@ function projectedEvents(bond, fromDate = null) {
  * rinviati fuori dalla v1: richiedono un solver.
  * @returns {string|null} frazione (0.0345 = 3,45%)
  */
-function currentYield(bond, cleanPrice) {
+function currentYield(bond: InstrumentLike, cleanPrice: Numeric) {
   const p = d(cleanPrice);
   if (p.lte(0)) return null;
   const annualPer100 = d(bond.couponRate, 0).times(HUNDRED);
@@ -260,7 +283,7 @@ function currentYield(bond, cleanPrice) {
 }
 
 /** Nominale = quantità × valore facciale. */
-function nominalOf(quantity, faceValue) {
+function nominalOf(quantity: Numeric, faceValue: Numeric): Decimal {
   return d(quantity).times(d(faceValue, 1));
 }
 
@@ -268,7 +291,7 @@ function nominalOf(quantity, faceValue) {
  * Valore di mercato di una posizione obbligazionaria, dal corso SECCO in % del
  * nominale: nominale × prezzo/100.
  */
-function bondValue(quantity, faceValue, pricePct) {
+function bondValue(quantity: Numeric, faceValue: Numeric, pricePct: Numeric): Decimal {
   return nominalOf(quantity, faceValue).times(d(pricePct)).div(HUNDRED);
 }
 

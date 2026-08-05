@@ -11,12 +11,19 @@
 import { getPool } from "./pool";
 import logger from "../logger";
 import { errMessage } from "../util/err";
+import type { PoolClient } from "pg";
 
 // Chiave distinta da MIGRATION_LOCK_KEY (918273645): due lock diversi non devono
 // contendersi lo stesso slot.
 const SCHEDULER_LOCK_KEY = 918273646;
 
 class Leadership {
+  readonly lockKey: number;
+  readonly label: string;
+  /** Il client che TIENE il lock: un advisory lock vive sulla connessione, non sul pool. */
+  private client: PoolClient | null;
+  isLeader: boolean;
+
   constructor(lockKey = SCHEDULER_LOCK_KEY, label = "scheduler") {
     this.lockKey = lockKey;
     this.label = label;

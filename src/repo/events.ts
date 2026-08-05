@@ -36,7 +36,7 @@ const COLS = `id, instrument_id, kind, status, ex_date, pay_date, amount_per_uni
 
 async function list({ from, to, instrumentId, kind, status, portfolioId }: EventFilter = {}) {
   const params: unknown[] = [];
-  const where = [];
+  const where: string[] = [];
   if (from) {
     params.push(from);
     where.push(`e.pay_date >= $${params.length}::date`);

@@ -65,19 +65,19 @@ function parse<T>(schema: ZodType<T>, data: unknown, what = "richiesta"): T {
 const body =
   <T,>(schema: ZodType<T>) =>
   async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
-    req.valid = { ...(req.valid || {}), body: parse(schema, req.body, "body") };
+    req.valid = { ...req.valid, body: parse(schema, req.body, "body") };
   };
 
 const query =
   <T,>(schema: ZodType<T>) =>
   async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
-    req.valid = { ...(req.valid || {}), query: parse(schema, req.query, "query string") };
+    req.valid = { ...req.valid, query: parse(schema, req.query, "query string") };
   };
 
 const params =
   <T,>(schema: ZodType<T>) =>
   async (req: FastifyRequest, _reply: FastifyReply): Promise<void> => {
-    req.valid = { ...(req.valid || {}), params: parse(schema, req.params, "parametri di percorso") };
+    req.valid = { ...req.valid, params: parse(schema, req.params, "parametri di percorso") };
   };
 
 export { z, parse, body, query, params, decimalString, dateString, currency, idParam, DECIMAL_RE, DATE_RE };

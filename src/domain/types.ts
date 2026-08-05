@@ -11,6 +11,9 @@
 import type Decimal from "decimal.js";
 import type { Ccy, DateString, DecimalString } from "../types";
 
+/** Un valore monetario in una qualunque delle forme che il dominio accetta. */
+type Amount = Decimal | DecimalString | number | null;
+
 /** Una riga di transazione accettata dal dominio, in una qualunque delle due forme. */
 export interface TxLike {
   id?: number | string;
@@ -21,22 +24,24 @@ export interface TxLike {
   type: string;
   tradeDate?: DateString | null;
   trade_date?: DateString | null;
-  quantity?: DecimalString | number | null;
-  price?: DecimalString | number | null;
-  grossAmount?: DecimalString | number | null;
-  gross_amount?: DecimalString | number | null;
-  fees?: DecimalString | number | null;
-  taxes?: DecimalString | number | null;
-  accruedInterest?: DecimalString | number | null;
-  accrued_interest?: DecimalString | number | null;
-  netAmount?: DecimalString | number | null;
-  net_amount?: DecimalString | number | null;
+  quantity?: Amount;
+  price?: Amount;
+  grossAmount?: Amount;
+  gross_amount?: Amount;
+  fees?: Amount;
+  taxes?: Amount;
+  accruedInterest?: Amount;
+  accrued_interest?: Amount;
+  netAmount?: Amount;
+  net_amount?: Amount;
   tradeCcy?: Ccy | null;
   trade_ccy?: Ccy | null;
-  fxRate?: DecimalString | number | null;
-  fx_rate?: DecimalString | number | null;
-  splitRatio?: DecimalString | number | null;
-  split_ratio?: DecimalString | number | null;
+  fxRate?: Amount;
+  fx_rate?: Amount;
+  splitRatio?: Amount;
+  split_ratio?: Amount;
+  /** Nominale indicato a mano su un'obbligazione (alternativo a quantity). */
+  nominal?: Amount;
   [key: string]: unknown;
 }
 
@@ -47,16 +52,16 @@ export interface NormalizedTx {
   instrumentId: number | null;
   type: string;
   tradeDate: DateString | null;
-  quantity: DecimalString | number | null;
-  price: DecimalString | number | null;
-  grossAmount: DecimalString | number | null;
-  fees: DecimalString | number | null;
-  taxes: DecimalString | number | null;
-  accruedInterest: DecimalString | number | null;
-  netAmount: DecimalString | number | null;
+  quantity: Amount;
+  price: Amount;
+  grossAmount: Amount;
+  fees: Amount;
+  taxes: Amount;
+  accruedInterest: Amount;
+  netAmount: Amount;
   tradeCcy: Ccy | null;
-  fxRate: DecimalString | number | null;
-  splitRatio: DecimalString | number | null;
+  fxRate: Amount;
+  splitRatio: Amount;
 }
 
 /** Quel poco che il dominio deve sapere di uno strumento per fare i conti. */
@@ -116,5 +121,24 @@ export interface Position {
 export interface CashFlow {
   date: DateString;
   amount: Decimal | DecimalString | number;
+  /** Importo gia' convertito in valuta base, quando il produttore lo conosce. */
+  amountBase?: Decimal | DecimalString | number | null;
+  /** BUY/SELL/DIVIDEND/... - decide se il flusso e' capitale (vedi CAPITAL_TYPES). */
+  type?: string;
   [key: string]: unknown;
+}
+
+/** Un punto di una serie temporale: valore alla data (null = non disponibile). */
+export interface SeriesPoint {
+  date: DateString;
+  value: Decimal | DecimalString | number | null;
+  /** true quando il punto e' stato calcolato con dati incompleti. */
+  partial?: boolean;
+  [key: string]: unknown;
+}
+
+/** Un cashflow ridotto a "quanto" e "a quanti giorni dall'inizio": la forma su cui lavora XIRR. */
+export interface DayFlow {
+  amount: Decimal;
+  days: number;
 }

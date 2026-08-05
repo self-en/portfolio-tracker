@@ -165,7 +165,7 @@ async function list({ quotes, date, from, to, base = BASE }: FxListFilter = {}) 
       ORDER BY rate_date DESC, quote_ccy LIMIT 2000`,
     params
   );
-  return r.map(rows.fxRate);
+  return rows.mapAll(r, rows.fxRate);
 }
 
 export { BASE, seriesForMany, ratesAsOf, rateAsOf, upsertRates, coverage, list };

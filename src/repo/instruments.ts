@@ -2,14 +2,25 @@ import { query } from "../db/pool";
 import * as rows from "./rows";
 import { normalizeDate } from "../domain/calendar";
 import { inList } from "./sqlUtil";
+import type { DateString, Instrument } from "../types";
+
+export interface InstrumentFilter {
+  q?: string;
+  assetClass?: string;
+  active?: boolean;
+  priceSource?: string;
+}
+
+/** Uno strumento in scrittura: come il modello, senza gli id e i timestamp. */
+export type InstrumentInput = Omit<Instrument, "id" | "createdAt" | "updatedAt">;
 
 const COLS = `id, asset_class, name, ticker, isin, exchange, currency, price_source,
   quote_convention, face_value, coupon_rate, coupon_frequency, first_coupon_date,
   maturity_date, day_count, issuer, metadata, notes, active, created_at, updated_at`;
 
-async function list({ q, assetClass, active, priceSource } = {}) {
-  const where = [];
-  const params = [];
+async function list({ q, assetClass, active, priceSource }: InstrumentFilter = {}) {
+  const where: string[] = [];
+  const params: unknown[] = [];
 
   if (q) {
     params.push(`%${q}%`);
@@ -35,31 +46,31 @@ async function list({ q, assetClass, active, priceSource } = {}) {
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY name ASC, id ASC`;
   const { rows: r } = await query(sql, params);
-  return r.map(rows.instrument);
+  return rows.mapAll(r, rows.instrument);
 }
 
-async function byId(id) {
+async function byId(id: number) {
   const { rows: r } = await query(`SELECT ${COLS} FROM instruments WHERE id = $1`, [id]);
   return rows.instrument(r[0]);
 }
 
-async function byIds(ids) {
+async function byIds(ids: readonly number[]) {
   if (!ids || ids.length === 0) return [];
-  const params = [];
+  const params: unknown[] = [];
   const { rows: r } = await query(
     `SELECT ${COLS} FROM instruments WHERE id ${inList(params, ids)}`,
     params
   );
-  return r.map(rows.instrument);
+  return rows.mapAll(r, rows.instrument);
 }
 
 /** Mappa id → strumento, la forma che si passa a domain/. */
-async function mapByIds(ids) {
+async function mapByIds(ids: readonly number[]) {
   const list_ = await byIds(ids);
-  return new Map(list_.map((i) => [i.id, i]));
+  return new Map(list_.filter((i): i is Instrument => i !== null).map((i) => [i.id, i]));
 }
 
-async function byIsinOrTicker({ isin, ticker }) {
+async function byIsinOrTicker({ isin, ticker }: { isin?: string | null; ticker?: string | null }) {
   const { rows: r } = await query(
     `SELECT ${COLS} FROM instruments
       WHERE ($1::text IS NOT NULL AND isin = $1) OR ($2::text IS NOT NULL AND ticker = $2)
@@ -69,7 +80,7 @@ async function byIsinOrTicker({ isin, ticker }) {
   return rows.instrument(r[0]);
 }
 
-const FIELDS = [
+const FIELDS: Array<[keyof InstrumentInput, string]> = [
   ["assetClass", "asset_class"],
   ["name", "name"],
   ["ticker", "ticker"],
@@ -90,9 +101,9 @@ const FIELDS = [
   ["active", "active"],
 ];
 
-async function create(input) {
+async function create(input: InstrumentInput) {
   const cols = [];
-  const params = [];
+  const params: unknown[] = [];
   const placeholders = [];
   for (const [key, col] of FIELDS) {
     if (input[key] === undefined) continue;
@@ -108,9 +119,9 @@ async function create(input) {
   return rows.instrument(r[0]);
 }
 
-async function update(id, patch) {
-  const sets = [];
-  const params = [];
+async function update(id: number, patch: Partial<InstrumentInput>) {
+  const sets: string[] = [];
+  const params: unknown[] = [];
   for (const [key, col] of FIELDS) {
     if (patch[key] === undefined) continue;
     params.push(patch[key] === "" ? null : patch[key]);
@@ -126,13 +137,13 @@ async function update(id, patch) {
   return rows.instrument(r[0]);
 }
 
-async function remove(id) {
+async function remove(id: number): Promise<boolean> {
   const { rowCount } = await query("DELETE FROM instruments WHERE id = $1", [id]);
   return (rowCount ?? 0) > 0;
 }
 
 /** Quante transazioni referenziano lo strumento (per il 409 su DELETE). */
-async function transactionCount(id) {
+async function transactionCount(id: number): Promise<number> {
   const { rows: r } = await query(
     "SELECT COUNT(*)::int AS n FROM transactions WHERE instrument_id = $1",
     [id]
@@ -141,7 +152,7 @@ async function transactionCount(id) {
 }
 
 /** Copertura della serie prezzi, per /api/instruments/:id e per il reconciler. */
-async function priceCoverage(id) {
+async function priceCoverage(id: number) {
   const { rows: r } = await query(
     `SELECT MIN(price_date) AS from_date, MAX(price_date) AS to_date, COUNT(*)::int AS rows
        FROM prices_daily WHERE instrument_id = $1`,
@@ -167,7 +178,7 @@ async function refreshable() {
       WHERE active = TRUE AND price_source = 'yahoo' AND ticker IS NOT NULL
       ORDER BY id`
   );
-  return r.map(rows.instrument);
+  return rows.mapAll(r, rows.instrument);
 }
 
 /**
@@ -175,7 +186,7 @@ async function refreshable() {
  * reconciler al boot usa per riaccodare i backfill perduti (la coda è in memoria e
  * i pod ripartono a ogni push).
  */
-async function staleCoverage(throughDate) {
+async function staleCoverage(throughDate: DateString) {
   const { rows: r } = await query(
     `SELECT i.id, i.name, i.ticker, MAX(p.price_date) AS last_price
        FROM instruments i

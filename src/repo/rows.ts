@@ -160,4 +160,16 @@ const incomeEvent = (r: DbRow | null | undefined): IncomeEvent | null =>
         updatedAt: r.updated_at,
       };
 
-export { instrument, transaction, portfolio, price, quote, fxRate, incomeEvent };
+/**
+ * Mappa un elenco di righe scartando i null.
+ *
+ * I mapper qui sopra ammettono null perche' servono anche per `r[0]` di un
+ * risultato vuoto ("nessuna riga" -> null). Mappando righe REALI il null non
+ * accade mai, e senza questo helper ogni chiamante di una list() si ritroverebbe
+ * un `T | null` da smentire con un cast: la conoscenza sta qui, una volta.
+ */
+function mapAll<T>(list: readonly DbRow[], map: (r: DbRow) => T | null): T[] {
+  return list.map(map).filter((x): x is T => x !== null);
+}
+
+export { instrument, transaction, portfolio, price, quote, fxRate, incomeEvent, mapAll };
