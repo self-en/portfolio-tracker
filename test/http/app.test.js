@@ -23,9 +23,8 @@ test("setup", async () => {
   boot.state.ready = true;
   boot.state.db.connected = true;
   const { buildApp } = require("../../src/app");
-  server = buildApp().listen(0);
-  await new Promise((r) => server.once("listening", r));
-  base = `http://127.0.0.1:${server.address().port}`;
+  server = await buildApp();
+  base = await server.listen({ port: 0, host: "127.0.0.1" });
 });
 
 // ---------------------------------------------------------------------------
@@ -176,5 +175,5 @@ test("il rate limit sul login scatta e restituisce Retry-After", async () => {
 });
 
 test("teardown", async () => {
-  await new Promise((r) => server.close(r));
+  await server.close();
 });

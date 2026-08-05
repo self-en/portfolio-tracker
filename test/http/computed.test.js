@@ -1,7 +1,7 @@
 // Test golden-file degli endpoint calcolati: un ledger fixture → assert sulla
 // risposta JSON intera.
 //
-// Gira contro l'app REALE (express + repo + domain) con pg-mem come database, così
+// Gira contro l'app REALE (fastify + repo + domain) con pg-mem come database, così
 // copre l'orchestrazione — che è dove i pezzi corretti si combinano in modo
 // sbagliato.
 const test = require("node:test");
@@ -26,10 +26,8 @@ async function startApp() {
   boot.state.db.connected = true;
 
   const { buildApp } = require("../../src/app");
-  const app = buildApp();
-  server = app.listen(0);
-  await new Promise((r) => server.once("listening", r));
-  base = `http://127.0.0.1:${server.address().port}`;
+  server = await buildApp();
+  base = await server.listen({ port: 0, host: "127.0.0.1" });
 
   const res = await fetch(`${base}/api/auth/login`, {
     method: "POST",
@@ -522,5 +520,5 @@ test("import in modalità replace ricostruisce lo stesso portafoglio", async () 
 });
 
 test("teardown", async () => {
-  await new Promise((r) => server.close(r));
+  await server.close();
 });

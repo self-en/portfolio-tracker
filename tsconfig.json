@@ -1,0 +1,19 @@
+{
+  "//": "Build del backend. Emette CommonJS in build/ e NON è un dettaglio: sul branch main la piattaforma preloada @opentelemetry/auto-instrumentations-node, che strumenta facendo monkey-patching di require(). Con output ESM express/pg/pino non verrebbero patchati e trace, metriche e log sparirebbero in silenzio. Vedi docs/decisions.md.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "outDir": "build",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "declaration": false,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

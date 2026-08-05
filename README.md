@@ -55,7 +55,7 @@ In locale non c'è un Postgres (né `psql`, né docker). Per esercitare l'intero
 HTTP contro un database **in memoria**:
 
 ```bash
-node scripts/dev-server-memdb.cjs 3099     # password: dev
+PORT=3099 npm run dev:memdb                # password: dev
 curl -s -c /tmp/j -H 'content-type: application/json' \
   -d '{"password":"dev"}' localhost:3099/api/auth/login
 curl -s -b /tmp/j localhost:3099/api/portfolio/summary | jq
@@ -76,7 +76,7 @@ dominio e sull'env di branch.
 - Cancellando il branch, env e database vengono rimossi. → [leggi questo](#backup-lexport-non-è-opzionale)
 
 **Non esiste un meccanismo di migrazione della piattaforma**: l'app crea e migra le
-tabelle **al boot**, in modo idempotente, sotto advisory lock (`src/db/migrate.js`).
+tabelle **al boot**, in modo idempotente, sotto advisory lock (`src/db/migrate.ts`).
 
 ## Configurazione obbligatoria
 
@@ -126,27 +126,42 @@ creato a mano) e che è stato rimosso.
 
 ## Architettura
 
-La root è **CommonJS**; `web/` è un pacchetto **ESM separato** con il suo
-`package.json`. Nessun workspace: quel confine è ciò che tiene `type: module` fuori
-dal server.
+Backend **TypeScript** su **Fastify**, compilato in `build/` da `tsc`; `web/` è un
+pacchetto **ESM separato** con il suo `package.json`. Nessun workspace: quel confine
+è ciò che tiene `type: module` fuori dal server.
+
+**Il backend compila in CommonJS, e non è un dettaglio**: su `main` la piattaforma
+preloada `build/instrumentation.js`, che strumenta facendo monkey-patching di
+`require()`. Con output ESM, fastify/pg/pino non verrebbero patchati e trace,
+metriche e log spariscono **in silenzio**. Non convertire il backend a ESM senza
+prima sistemare la strumentazione.
 
 ```
-server.js                bootstrap sottile: listen() PRIMA delle migrazioni
 src/
-  config.js              parsing env, rilevamento locked-mode
-  logger.js              singleton pino — l'UNICO logger del processo
-  app.js                 buildApp() → express app
-  boot.js                migrazioni con retry, scheduler, reconciler
-  static.js              serve web/dist + fallback SPA
+  server.ts              bootstrap sottile: listen() PRIMA delle migrazioni
+  instrumentation.ts     bootstrap OTel (set automatico + instrumentation-fastify)
+  config.ts              parsing env, rilevamento locked-mode. L'UNICO posto che
+                         legge process.env (dichiarato in self-en.json)
+  logger.ts              singleton pino — l'UNICO logger del processo
+  app.ts                 buildApp() → istanza Fastify
+  boot.ts                migrazioni con retry, scheduler, reconciler
+  static.ts              serve web/dist + fallback SPA (notFoundHandler)
+  types.ts               il modello di dominio: numerici come STRINGA, date "YYYY-MM-DD"
+  platform/config.ts     contratto con la piattaforma. GESTITO DA NEDO, non modificare
   db/                    pool (type parser!), migrate, leader, migrations/
   repo/                  l'UNICO posto con SQL. Numerici come stringa.
   domain/                PURO. Zero I/O. La superficie di unit test.
   market/                provider, tolerant, refresher, scheduler
-  http/                  auth, validate, errors, serialize, routes/
+  http/                  auth, validate, errors, serialize, routes/ (plugin Fastify)
+self-en.json             le variabili d'ambiente che l'app dichiara alla piattaforma
 web/                     SPA Vite + React
 test/                    domain/ market/ repo/ http/ db/ + fixtures/
 docs/decisions.md        le convenzioni bloccate — leggilo prima di contribuire
 ```
+
+I test girano contro i sorgenti `.ts` (`node --import tsx --test`), quindi la rete
+di sicurezza non dipende dalla build. `npm run typecheck` e `npm run check:contract`
+sono gate della CI insieme ai test: niente immagine se uno dei tre è rosso.
 
 ### Confini fatti rispettare da test automatici
 
@@ -155,7 +170,7 @@ Non sono linee guida: tre test falliscono se vengono violati.
 | Modulo        | Può importare                 | Non può                                            |
 | ------------- | ----------------------------- | -------------------------------------------------- |
 | `src/domain/` | **solo `decimal.js`**         | `pg`, `logger`, `Date.now()` — il tempo è parametro |
-| `src/repo/`   | `pg`, `domain/`               | provider di mercato, express                       |
+| `src/repo/`   | `pg`, `domain/`               | provider di mercato, fastify                        |
 | `src/market/` | provider, `repo/`, `logger`   | **mai `domain/`**                                  |
 | `src/http/`   | `repo/`, `domain/`, `market/` | SQL inline                                         |
 
@@ -169,7 +184,7 @@ Tutte motivate in **`docs/decisions.md`**. Le tre che mordono più spesso:
 1. **Il denaro è `decimal.js` + `NUMERIC` + stringhe sul filo.** Mai `parseFloat`,
    mai `Number()`, mai `.toFixed()` su un float dentro `domain/` o `repo/`. I type
    parser di `pg` per `NUMERIC`, `INT8` e **`DATE`** sono registrati in
-   `src/db/pool.js`: senza l'override su `DATE`, `2026-01-01` diventa un `Date` a
+   `src/db/pool.ts`: senza l'override su `DATE`, `2026-01-01` diventa un `Date` a
    mezzanotte locale e un `toISOString()` a valle produce `2025-12-31`.
 2. **Direzione FX dichiarata una volta**: `rate` = unità di `quote_ccy` per 1 EUR.
    Per convertire X → EUR si **divide**. Invertire questa riga è il bug FX classico.
@@ -181,7 +196,7 @@ Tutte motivate in **`docs/decisions.md`**. Le tre che mordono più spesso:
 E la regola della piattaforma: **vietato `console.log`** (non viene inoltrato via
 OTLP). Sempre il `logger` pino. `./scripts/check-no-console.sh` lo verifica — e nota
 che il logger *di default* di `yahoo-finance2` è `console.*`: è l'adapter pino in
-`src/market/yahooProvider.js` a prevenire una violazione che il grep non vedrebbe.
+`src/market/yahooProvider.ts` a prevenire una violazione che il grep non vedrebbe.
 
 ## Test
 
@@ -263,7 +278,7 @@ Verificato in Fase 0: `IT0005611741`, `IT0005433195`, `IT0005240830` restituisco
 tutti `quotes: []` da Yahoo, e cercare `"BTP"` restituisce banche indonesiane. Quindi
 per i bond il **pricing manuale è la strada normale**, non un ripiego:
 `price_source='manual'` + `PUT /instruments/:id/prices`. Le cedole future esistono
-perché le **calcoliamo** dallo scadenzario (`src/domain/bonds.js`, generato
+perché le **calcoliamo** dallo scadenzario (`src/domain/bonds.ts`, generato
 all'indietro dalla scadenza): è questo che fa funzionare il calendario con copertura
 provider pari a zero.
 

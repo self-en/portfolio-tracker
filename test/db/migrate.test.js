@@ -95,7 +95,7 @@ test("un checksum modificato viene rilevato e NON blocca il boot", async () => {
 });
 
 test("le migrazioni registrate hanno checksum stabile e versioni uniche", () => {
-  const migrations = require("../../src/db/migrations");
+  const { migrations } = require("../../src/db/migrations");
   const versions = migrations.map((m) => m.version);
   assert.equal(new Set(versions).size, versions.length, "versioni duplicate");
   // Ordine crescente esplicito: nessun globbing di directory.

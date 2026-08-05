@@ -5,7 +5,7 @@ che richiede una migrazione e un giro di test, non una modifica locale.
 
 ## 1. Denaro: `decimal.js`, `NUMERIC`, stringhe sul filo
 
-- Aritmetica solo con il `Decimal` configurato in `src/domain/money.js`
+- Aritmetica solo con il `Decimal` configurato in `src/domain/money.ts`
   (`precision: 34`, `ROUND_HALF_EVEN`). Mai interi in unità minori: le quantità
   vogliono 8 decimali (quote frazionarie), i tassi FX 10, i prezzi obbligazionari
   sono percentuali con 4+ decimali, e il multivaluta implica esponenti minori
@@ -16,13 +16,13 @@ che richiede una migrazione e un giro di test, non una modifica locale.
 - Vietati `+`, `*`, `parseFloat`, `Number()`, `.toFixed()` su Number dentro
   `src/domain/` e `src/repo/`.
 - Le risposte API portano denaro e quantità come **stringhe**. React formatta con
-  `Intl.NumberFormat("it-IT")` in `web/src/format.js`.
+  `Intl.NumberFormat("it-IT")` in `web/src/format.js` (il frontend è ancora JavaScript).
 - L'unico confine float autorizzato è `web/src/charts/`, dove i valori diventano
   coordinate in pixel.
 
 ### Type parser di `pg` — obbligatori
 
-In `src/db/pool.js`, prima di qualsiasi query:
+In `src/db/pool.ts`, prima di qualsiasi query:
 
 | OID  | Tipo    | Override         | Perché                                                        |
 | ---- | ------- | ---------------- | ------------------------------------------------------------- |
@@ -55,7 +55,7 @@ Default **costo medio ponderato** per strumento, la convenzione degli
 intermediari italiani in regime amministrato: i numeri riconciliano con
 l'estratto conto del broker, che è la sola riconciliazione che conti.
 
-- Implementato come reducer in `src/domain/positions.js`:
+- Implementato come reducer in `src/domain/positions.ts`:
   `buildPositions(txs, { method: "AVERAGE" })`. Il parametro `method` è il seam
   per FIFO (v1.1) — non ancora implementato.
 - **Le commissioni di acquisto aumentano il carico** (prassi italiana).
@@ -109,7 +109,7 @@ Regole:
 
 Tutta la matematica sulle date lavora su stringhe `"YYYY-MM-DD"` con aritmetica
 `Date.UTC`, **mai su un `Date` in fuso locale**. Così il DST si aggira invece di
-testarci intorno. Vedi `src/domain/calendar.js`.
+testarci intorno. Vedi `src/domain/calendar.ts`.
 
 `transactions.trade_date` è la data economica (ex-date per i redditi) e guida
 tutta la matematica. `settle_date` è informativa.
@@ -119,7 +119,7 @@ tutta la matematica. `settle_date` è informativa.
 | Modulo         | Può importare                       | Non può                                             |
 | -------------- | ----------------------------------- | --------------------------------------------------- |
 | `src/domain/`  | **solo `decimal.js`**               | `pg`, `logger`, `Date.now()` — il tempo è parametro  |
-| `src/repo/`    | `pg`, `domain/`                     | provider di mercato, express                        |
+| `src/repo/`    | `pg`, `domain/`                     | provider di mercato, fastify                        |
 | `src/market/`  | provider, `repo/`, `logger`         | **mai `domain/`**                                   |
 | `src/http/`    | `repo/`, `domain/`, `market/`       | SQL inline                                          |
 
@@ -159,8 +159,8 @@ matematica verificabile senza Postgres (che in locale non c'è).
 ## 10. Piattaforma
 
 - **Vietato `console.log`**: non viene inoltrato via OTLP. Sempre il `logger`
-  pino di `src/logger.js`. Nota: il logger di default di `yahoo-finance2` è
-  `console.*` → l'adapter in `src/market/yahooProvider.js` è ciò che previene una
+  pino di `src/logger.ts`. Nota: il logger di default di `yahoo-finance2` è
+  `console.*` → l'adapter in `src/market/yahooProvider.ts` è ciò che previene una
   violazione silenziosa. Deve fornire tutti e cinque
   `info/warn/error/debug/dir`.
 - **Mai crashare al boot.** Un crashloop su questa piattaforma significa nessun
@@ -182,9 +182,9 @@ matematica verificabile senza Postgres (che in locale non c'è).
 
   | Cosa | Dove | Se attiva su HTTP |
   | --- | --- | --- |
-  | `Secure` sul cookie | `src/config.js` | login 204, poi 401 su tutto |
-  | `hsts` | `src/app.js` (helmet) | il browser cerca https per mesi |
-  | `upgrade-insecure-requests` | `src/app.js` (helmet, **default ON**) | pagina bianca: ogni asset richiesto in https |
+  | `Secure` sul cookie | `src/config.ts` | login 204, poi 401 su tutto |
+  | `hsts` | `src/app.ts` (helmet) | il browser cerca https per mesi |
+  | `upgrade-insecure-requests` | `src/app.ts` (helmet, **default ON**) | pagina bianca: ogni asset richiesto in https |
 
   `upgradeInsecureRequests: null` è obbligatorio nella CSP: helmet la include per
   default, e ordina al browser di riscrivere in https ogni richiesta della pagina.

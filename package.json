@@ -3,31 +3,41 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "main": "server.js",
+  "main": "build/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev:api": "SCHEDULER_ENABLED=false node server.js",
+    "start": "node build/server.js",
+    "dev:api": "SCHEDULER_ENABLED=false tsx watch src/server.ts",
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web install --include=dev && npm --prefix web run build",
-    "test": "node --test \"test/**/*.test.js\"",
-    "test:domain": "node --test \"test/domain/**/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
+    "test": "node --import tsx --test \"test/**/*.test.js\"",
+    "test:domain": "node --import tsx --test \"test/domain/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
+    "build": "tsc -p tsconfig.json && npm run build:sql",
+    "build:sql": "mkdir -p build/db/migrations && cp src/db/migrations/*.sql build/db/migrations/",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:contract": "node scripts/check-contract.mjs",
+    "dev:memdb": "node --import tsx scripts/dev-server-memdb.cjs"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/helmet": "^13.1.0",
+    "@fastify/static": "^10.1.2",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.79.0",
     "@opentelemetry/sdk-node": "^0.221.0",
-    "cookie-parser": "^1.4.7",
     "decimal.js": "^10.6.0",
-    "express": "^4.19.2",
-    "helmet": "^8.3.0",
+    "fastify": "^5.11.2",
     "node-cron": "^4.6.0",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
     "yahoo-finance2": "4.0.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@opentelemetry/instrumentation-fastify": "^0.56.0"
   },
   "devDependencies": {
-    "pg-mem": "^3.0.14"
+    "@types/node": "^26.1.2",
+    "pg-mem": "^3.0.14",
+    "tsx": "^4.23.7",
+    "typescript": "^5.9.3"
   }
 }
