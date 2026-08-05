@@ -119,7 +119,7 @@ tutta la matematica. `settle_date` è informativa.
 | Modulo         | Può importare                       | Non può                                             |
 | -------------- | ----------------------------------- | --------------------------------------------------- |
 | `src/domain/`  | **solo `decimal.js`**               | `pg`, `logger`, `Date.now()` — il tempo è parametro  |
-| `src/repo/`    | `pg`, `domain/`                     | provider di mercato, express                        |
+| `src/repo/`    | `pg`, `domain/`                     | provider di mercato, fastify                        |
 | `src/market/`  | provider, `repo/`, `logger`         | **mai `domain/`**                                   |
 | `src/http/`    | `repo/`, `domain/`, `market/`       | SQL inline                                          |
 

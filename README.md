@@ -126,27 +126,42 @@ creato a mano) e che è stato rimosso.
 
 ## Architettura
 
-La root è **CommonJS**; `web/` è un pacchetto **ESM separato** con il suo
-`package.json`. Nessun workspace: quel confine è ciò che tiene `type: module` fuori
-dal server.
+Backend **TypeScript** su **Fastify**, compilato in `build/` da `tsc`; `web/` è un
+pacchetto **ESM separato** con il suo `package.json`. Nessun workspace: quel confine
+è ciò che tiene `type: module` fuori dal server.
+
+**Il backend compila in CommonJS, e non è un dettaglio**: su `main` la piattaforma
+preloada `build/instrumentation.js`, che strumenta facendo monkey-patching di
+`require()`. Con output ESM, fastify/pg/pino non verrebbero patchati e trace,
+metriche e log spariscono **in silenzio**. Non convertire il backend a ESM senza
+prima sistemare la strumentazione.
 
 ```
-server.js                bootstrap sottile: listen() PRIMA delle migrazioni
 src/
-  config.js              parsing env, rilevamento locked-mode
-  logger.js              singleton pino — l'UNICO logger del processo
-  app.js                 buildApp() → express app
-  boot.js                migrazioni con retry, scheduler, reconciler
-  static.js              serve web/dist + fallback SPA
+  server.ts              bootstrap sottile: listen() PRIMA delle migrazioni
+  instrumentation.ts     bootstrap OTel (set automatico + instrumentation-fastify)
+  config.ts              parsing env, rilevamento locked-mode. L'UNICO posto che
+                         legge process.env (dichiarato in self-en.json)
+  logger.ts              singleton pino — l'UNICO logger del processo
+  app.ts                 buildApp() → istanza Fastify
+  boot.ts                migrazioni con retry, scheduler, reconciler
+  static.ts              serve web/dist + fallback SPA (notFoundHandler)
+  types.ts               il modello di dominio: numerici come STRINGA, date "YYYY-MM-DD"
+  platform/config.ts     contratto con la piattaforma. GESTITO DA NEDO, non modificare
   db/                    pool (type parser!), migrate, leader, migrations/
   repo/                  l'UNICO posto con SQL. Numerici come stringa.
   domain/                PURO. Zero I/O. La superficie di unit test.
   market/                provider, tolerant, refresher, scheduler
-  http/                  auth, validate, errors, serialize, routes/
+  http/                  auth, validate, errors, serialize, routes/ (plugin Fastify)
+self-en.json             le variabili d'ambiente che l'app dichiara alla piattaforma
 web/                     SPA Vite + React
 test/                    domain/ market/ repo/ http/ db/ + fixtures/
 docs/decisions.md        le convenzioni bloccate — leggilo prima di contribuire
 ```
+
+I test girano contro i sorgenti `.ts` (`node --import tsx --test`), quindi la rete
+di sicurezza non dipende dalla build. `npm run typecheck` e `npm run check:contract`
+sono gate della CI insieme ai test: niente immagine se uno dei tre è rosso.
 
 ### Confini fatti rispettare da test automatici
 
@@ -155,7 +170,7 @@ Non sono linee guida: tre test falliscono se vengono violati.
 | Modulo        | Può importare                 | Non può                                            |
 | ------------- | ----------------------------- | -------------------------------------------------- |
 | `src/domain/` | **solo `decimal.js`**         | `pg`, `logger`, `Date.now()` — il tempo è parametro |
-| `src/repo/`   | `pg`, `domain/`               | provider di mercato, express                       |
+| `src/repo/`   | `pg`, `domain/`               | provider di mercato, fastify                        |
 | `src/market/` | provider, `repo/`, `logger`   | **mai `domain/`**                                  |
 | `src/http/`   | `repo/`, `domain/`, `market/` | SQL inline                                         |
 

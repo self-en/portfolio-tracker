@@ -47,6 +47,9 @@ function build() {
     port: int(process.env.PORT, 3000),
     repoName: process.env.REPO_NAME || "portfolio-tracker",
     nodeEnv: process.env.NODE_ENV || "development",
+    // Il fuso del PROCESSO (il container gira in UTC): serve solo alla
+    // diagnostica, ma passa da qui come ogni altra variabile.
+    tz: process.env.TZ || null,
 
     locked: problems.length > 0,
     lockedReasons: problems,

@@ -24,6 +24,7 @@ jobs:
       # npm salterebbe in silenzio pg-mem e vite, e i test fallirebbero con un
       # MODULE_NOT_FOUND che non spiega la causa.
       - run: npm ci --include=dev
+      - run: npm run check:contract
       - run: npm run typecheck
       - run: npm test
       - run: ./scripts/check-no-console.sh

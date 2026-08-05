@@ -7,6 +7,7 @@ import { errorHandler } from "./http/errors";
 import { createLimiter } from "./http/rateLimit";
 import { buildApiRouter } from "./http/routes";
 import { mountStatic } from "./static";
+import { registerPlatformConfig } from "./platform/config";
 
 /**
  * Costruisce l'app. Restituisce un'istanza Fastify NON ancora in ascolto: chi
@@ -69,6 +70,19 @@ async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(fastifyCookie);
+
+  // Contratto di configurazione con la piattaforma: espone GET /_self-en/config
+  // (dichiarazione + variabili mancanti, e' come nedo sa cosa chiedere) e, se
+  // manca una variabile OBBLIGATORIA dichiarata in self-en.json, risponde con la
+  // pagina "da configurare" al posto dell'app.
+  //
+  // Si compone con il locked mode di src/config.ts invece di sostituirlo: il
+  // modulo guarda solo la PRESENZA delle variabili, mentre config.ts controlla
+  // anche che SESSION_SECRET sia lunga almeno 32 caratteri. Quindi una variabile
+  // assente la intercetta il modulo (con l'indicazione di dove impostarla), una
+  // troppo corta resta un 503 not_configured con le sue `reasons`, che e' quello
+  // che la SPA legge.
+  registerPlatformConfig(app);
 
   // Log di accesso strutturato, nella forma dello scaffold. Su `main` ogni riga
   // diventa un record OTLP che porta il trace context della richiesta (si salta da

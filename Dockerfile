@@ -40,6 +40,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY --from=server /app/build ./build
 COPY --from=web /web/dist ./web/dist
+# La dichiarazione delle variabili: src/platform/config.ts la legge a runtime per
+# servire /_self-en/config e sapere cosa manca.
+COPY self-en.json ./
 EXPOSE 3000
 
 # start-period=10s: al boot girano le migrazioni sotto advisory lock, e su un

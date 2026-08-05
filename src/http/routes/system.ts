@@ -58,7 +58,7 @@ const router: FastifyPluginAsync = async (app) => {
       time: {
         utc: new Date().toISOString(),
         local: new Date().toLocaleString("it-IT", { timeZone: config.scheduler.timezone }),
-        tzEnv: process.env.TZ || null,
+        tzEnv: config.tz,
       },
       warnings,
     });

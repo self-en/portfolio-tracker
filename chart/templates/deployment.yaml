@@ -105,16 +105,22 @@ spec:
           value: "otlp"
         - name: OTEL_LOGS_EXPORTER
           value: "otlp"
-        # Zero-code OpenTelemetry: preload the auto-instrumentation register hook
-        # (added to package.json), which instruments express/pg/http and exports
+        # Zero-code OpenTelemetry: preload the instrumentation bootstrap, which
+        # instruments fastify/pg/http and exports
         # traces + metrics + logs over OTLP to the endpoint above. Logs flow via
-        # the pino instrumentation (the app logs through pino, see server.js) -
+        # the pino instrumentation (the app logs through pino, see src/logger.ts) -
         # bare console.log is NOT bridged to OTLP. Gated on otel.endpoint (only the
         # `main` branch, per the ApplicationSet), so on every other branch
         # NODE_OPTIONS is unset, the SDK is never loaded, and nothing tries to
         # export to a missing collector.
+        #
+        # Preloada il NOSTRO bootstrap invece del meta-pacchetto
+        # `@opentelemetry/auto-instrumentations-node/register`, che NON include la
+        # strumentazione di Fastify: con quello si avrebbero le span http grezze e
+        # nessuna span di route/handler. src/instrumentation.ts registra il set
+        # automatico standard PIU' instrumentation-fastify.
         - name: NODE_OPTIONS
-          value: "--require @opentelemetry/auto-instrumentations-node/register"
+          value: "--require /app/build/instrumentation.js"
         {{- end }}
         readinessProbe:
           httpGet:

@@ -100,7 +100,7 @@ async function startScheduler(state: BootState) {
   try {
     const local = new Date().toLocaleString("it-IT", { timeZone: tz });
     const utc = new Date().toISOString();
-    logger.info({ timezone: tz, local, utc, tzEnv: process.env.TZ || null }, "[scheduler] fuso orario");
+    logger.info({ timezone: tz, local, utc, tzEnv: config.tz || null }, "[scheduler] fuso orario");
   } catch (err) {
     logger.error(
       { timezone: tz, err: errMessage(err) },
