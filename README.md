@@ -76,7 +76,7 @@ dominio e sull'env di branch.
 - Cancellando il branch, env e database vengono rimossi. → [leggi questo](#backup-lexport-non-è-opzionale)
 
 **Non esiste un meccanismo di migrazione della piattaforma**: l'app crea e migra le
-tabelle **al boot**, in modo idempotente, sotto advisory lock (`src/db/migrate.js`).
+tabelle **al boot**, in modo idempotente, sotto advisory lock (`src/db/migrate.ts`).
 
 ## Configurazione obbligatoria
 
@@ -184,7 +184,7 @@ Tutte motivate in **`docs/decisions.md`**. Le tre che mordono più spesso:
 1. **Il denaro è `decimal.js` + `NUMERIC` + stringhe sul filo.** Mai `parseFloat`,
    mai `Number()`, mai `.toFixed()` su un float dentro `domain/` o `repo/`. I type
    parser di `pg` per `NUMERIC`, `INT8` e **`DATE`** sono registrati in
-   `src/db/pool.js`: senza l'override su `DATE`, `2026-01-01` diventa un `Date` a
+   `src/db/pool.ts`: senza l'override su `DATE`, `2026-01-01` diventa un `Date` a
    mezzanotte locale e un `toISOString()` a valle produce `2025-12-31`.
 2. **Direzione FX dichiarata una volta**: `rate` = unità di `quote_ccy` per 1 EUR.
    Per convertire X → EUR si **divide**. Invertire questa riga è il bug FX classico.
@@ -196,7 +196,7 @@ Tutte motivate in **`docs/decisions.md`**. Le tre che mordono più spesso:
 E la regola della piattaforma: **vietato `console.log`** (non viene inoltrato via
 OTLP). Sempre il `logger` pino. `./scripts/check-no-console.sh` lo verifica — e nota
 che il logger *di default* di `yahoo-finance2` è `console.*`: è l'adapter pino in
-`src/market/yahooProvider.js` a prevenire una violazione che il grep non vedrebbe.
+`src/market/yahooProvider.ts` a prevenire una violazione che il grep non vedrebbe.
 
 ## Test
 
@@ -278,7 +278,7 @@ Verificato in Fase 0: `IT0005611741`, `IT0005433195`, `IT0005240830` restituisco
 tutti `quotes: []` da Yahoo, e cercare `"BTP"` restituisce banche indonesiane. Quindi
 per i bond il **pricing manuale è la strada normale**, non un ripiego:
 `price_source='manual'` + `PUT /instruments/:id/prices`. Le cedole future esistono
-perché le **calcoliamo** dallo scadenzario (`src/domain/bonds.js`, generato
+perché le **calcoliamo** dallo scadenzario (`src/domain/bonds.ts`, generato
 all'indietro dalla scadenza): è questo che fa funzionare il calendario con copertura
 provider pari a zero.
 
