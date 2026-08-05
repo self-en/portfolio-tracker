@@ -15,7 +15,8 @@
     "build": "tsc -p tsconfig.json && npm run build:sql",
     "build:sql": "mkdir -p build/db/migrations && cp src/db/migrations/*.sql build/db/migrations/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:contract": "node scripts/check-contract.mjs"
+    "check:contract": "node scripts/check-contract.mjs",
+    "dev:memdb": "node --import tsx scripts/dev-server-memdb.cjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

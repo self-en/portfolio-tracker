@@ -31,7 +31,11 @@ const { Pool } = db.adapters.createPg();
 const memPool = new Pool();
 pool._setPool(memPool);
 
-const logger = require("../src/logger");
+// I moduli di src/ sono TypeScript con export default: sotto tsx, require() di un
+// export default restituisce { default: ... }. Questo script e' CJS di proposito
+// (lo si lancia con `node --import tsx`), quindi l'interop la fa a mano.
+const interop = (m) => (m && m.default) || m;
+const logger = interop(require("../src/logger"));
 const { buildApp } = require("../src/app");
 const boot = require("../src/boot");
 
@@ -42,10 +46,10 @@ const boot = require("../src/boot");
   boot.state.migrations.pending = [];
   boot.state.migrations.applied = ["001_init", "002_seed"];
 
-  const app = buildApp();
-  app.listen(Number(process.env.PORT), () =>
-    logger.info(`[dev-memdb] in ascolto su :${process.env.PORT} (database in memoria)`)
-  );
+  // Fastify: buildApp e listen sono asincroni, e listen restituisce l'indirizzo.
+  const app = await buildApp();
+  const address = await app.listen({ port: Number(process.env.PORT), host: "127.0.0.1" });
+  logger.info(`[dev-memdb] in ascolto su ${address} (database in memoria)`);
 })().catch((e) => {
   console.error("avvio fallito:", e);
   process.exit(1);

@@ -55,7 +55,7 @@ In locale non c'è un Postgres (né `psql`, né docker). Per esercitare l'intero
 HTTP contro un database **in memoria**:
 
 ```bash
-node scripts/dev-server-memdb.cjs 3099     # password: dev
+PORT=3099 npm run dev:memdb                # password: dev
 curl -s -c /tmp/j -H 'content-type: application/json' \
   -d '{"password":"dev"}' localhost:3099/api/auth/login
 curl -s -b /tmp/j localhost:3099/api/portfolio/summary | jq
