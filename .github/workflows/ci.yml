@@ -26,13 +26,17 @@ jobs:
       - run: npm ci --include=dev
       - run: npm run check:contract
       - run: npm run typecheck
-      - run: npm test
-      - run: ./scripts/check-no-console.sh
 
       # La build della SPA è parte del contratto: se non compila, l'immagine
-      # verrebbe pubblicata senza frontend.
+      # verrebbe pubblicata senza frontend. Gira PRIMA dei test, di proposito: i
+      # test che verificano il serving della SPA (cache degli asset, fallback,
+      # 404 su un bundle mancante) senza `web/dist` escono subito senza asserire
+      # niente - ed e' esattamente li' che si e' nascosto un errore di avvio.
       - run: npm --prefix web ci --include=dev
       - run: npm --prefix web run build
+
+      - run: npm test
+      - run: ./scripts/check-no-console.sh
 
   build-and-push:
     needs: test

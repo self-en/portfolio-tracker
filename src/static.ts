@@ -37,26 +37,32 @@ async function mountStatic(app: FastifyInstance): Promise<void> {
   const hasBuild = fs.existsSync(INDEX);
 
   if (hasBuild) {
-    // Gli asset di Vite hanno l'hash del contenuto nel nome → immutable, 1 anno.
-    await app.register(fastifyStatic, {
-      root: path.join(DIST, "assets"),
-      prefix: "/assets/",
-      wildcard: false,
-      immutable: true,
-      maxAge: "1y",
-      decorateReply: true,
-    });
-
-    // Tutto il resto (favicon, manifest, …) con cache breve. `index: false` +
-    // `wildcard: false`: index.html lo serve il notFoundHandler, che è l'unico
-    // posto che ci mette `no-store`.
+    // UNA sola registrazione, e non e' una semplificazione estetica: con
+    // `wildcard: false` @fastify/static registra una route per ogni file reale,
+    // quindi registrare anche `/assets` a parte fa dichiarare DUE VOLTE le stesse
+    // route e Fastify rifiuta di avviarsi ("Method already declared for route
+    // /assets/index-*.js"). Preso dall'ambiente di anteprima: in locale e in CI i
+    // test girano senza `web/dist`, quindi nessuno dei due lo vedeva.
+    //
+    // La differenza di cache la fa setHeaders: gli asset di Vite hanno l'hash del
+    // contenuto nel nome (immutable, 1 anno), tutto il resto - favicon, manifest -
+    // cache breve. `index: false`: index.html lo serve il notFoundHandler, che e'
+    // l'unico posto che ci mette `no-store`.
     await app.register(fastifyStatic, {
       root: DIST,
       prefix: "/",
       wildcard: false,
       index: false,
-      maxAge: "5m",
-      decorateReply: false,
+      decorateReply: true,
+      // In questa versione di @fastify/static setHeaders riceve la FastifyReply
+      // (non la risposta grezza di node come in `send`): quindi reply.header.
+      setHeaders(reply, pathname) {
+        const isHashedAsset = pathname.includes(`${path.sep}assets${path.sep}`);
+        void reply.header(
+          "Cache-Control",
+          isHashedAsset ? "public, max-age=31536000, immutable" : "public, max-age=300"
+        );
+      },
     });
     logger.info({ dist: DIST }, "[static] SPA montata");
   } else {
