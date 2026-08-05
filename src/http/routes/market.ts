@@ -7,6 +7,7 @@ import { err } from "../errors";
 import { z, query, body, dateString } from "../validate";
 import { createLimiter } from "../rateLimit";
 import type { FastifyPluginAsync } from "fastify";
+import { errMessage } from "../../util/err";
 
 
 /**
@@ -21,7 +22,7 @@ const SEARCH_TTL_MS = 10 * 60 * 1000;
 const SEARCH_MAX = 200;
 const searchCache = new Map();
 
-function cacheGet(key) {
+function cacheGet(key: string) {
   const hit = searchCache.get(key);
   if (!hit) return null;
   if (Date.now() - hit.at > SEARCH_TTL_MS) {
@@ -35,7 +36,7 @@ function cacheGet(key) {
   return hit.value;
 }
 
-function cacheSet(key, value) {
+function cacheSet(key: string, value: unknown): void {
   searchCache.set(key, { at: Date.now(), value });
   while (searchCache.size > SEARCH_MAX) {
     searchCache.delete(searchCache.keys().next().value);
@@ -58,7 +59,7 @@ const router: FastifyPluginAsync = async (app) => {
     } catch (e) {
       // Il provider giù non è un 500: è un upstream che non risponde, e la UI deve
       // poter dire "cerca non disponibile, inserisci il ticker a mano".
-      logger.warn({ q, err: String(e.message).slice(0, 200) }, "[market] ricerca fallita");
+      logger.warn({ q, err: errMessage(e).slice(0, 200) }, "[market] ricerca fallita");
       throw err("upstream_error", "il provider di mercato non è raggiungibile", {
         hint: "puoi inserire ticker e ISIN manualmente",
       });

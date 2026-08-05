@@ -15,12 +15,7 @@ import { Leadership, SCHEDULER_LOCK_KEY } from "../db/leader";
 import * as refreshLog from "../repo/refreshLog";
 import * as refresher from "./refresher";
 import { errMessage } from "../util/err";
-/** Il pezzo di stato del boot che lo scheduler aggiorna (src/boot.ts). */
-interface BootState {
-  scheduler: { leader: boolean; lastRuns: Record<string, unknown> };
-  [key: string]: unknown;
-}
-
+import type { BootState } from "../boot";
 /** Un task di node-cron: ne usiamo solo stop(). */
 interface ScheduledTask {
   stop: () => void;

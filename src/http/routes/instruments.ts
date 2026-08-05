@@ -10,12 +10,14 @@ import * as schemas from "../schemas";
 import { errCode, errMessage } from "../../util/err";
 import { enqueueBackfill } from "../../market/refresher";
 import type { FastifyPluginAsync } from "fastify";
+import type { Instrument } from "../../types";
+import type { IncomeEventInput } from "../../repo/events";
 
 
 /** Il rateo obbligazionario e lo scadenzario sono utili nella risposta, non solo in UI. */
-function withBondDetails(inst) {
+function withBondDetails(inst: Instrument | null) {
   if (!inst) return inst;
-  const out = {
+  const out: Record<string, any> = {
     id: inst.id,
     assetClass: inst.assetClass,
     name: inst.name,
@@ -52,19 +54,19 @@ function withBondDetails(inst) {
  * NULLA per i BTP (verificato in Fase 0 — tre ISIN, tutti `quotes: []`), quindi le
  * cedole future esistono solo perché le calcoliamo noi.
  */
-async function regenerateProjected(inst) {
+async function regenerateProjected(inst: Instrument) {
   if (inst.assetClass !== "BOND" || !inst.maturityDate) return 0;
   try {
     const events = bonds.projectedEvents(inst, null).map((e) => ({
       kind: e.kind,
       status: "PROJECTED",
-      exDate: null,
+      exDate: null as string | null,
       payDate: e.payDate,
       amountPerUnit: e.amountPerUnit,
       currency: inst.currency,
       source: "schedule",
     }));
-    const n = await eventsRepo.replaceProjected(inst.id, events);
+    const n = await eventsRepo.replaceProjected(inst.id, events as IncomeEventInput[]);
     logger.info({ instrumentId: inst.id, events: n }, "[instruments] cedole proiettate rigenerate");
     return n;
   } catch (err) {
@@ -118,13 +120,13 @@ const router: FastifyPluginAsync = async (app) => {
     }
 
     const created = await instrumentsRepo.create(input);
-    await regenerateProjected(created);
+    await regenerateProjected(created!);
 
     // 201 SUBITO, backfill in background: uno `chart` di 2 anni non deve far
     // aspettare il form (§4.4 — gli handler HTTP non chiamano provider in modo
     // sincrono).
     try {
-      enqueueBackfill(created.id);
+      enqueueBackfill(created!.id);
     } catch (err) {
       if (errCode(err) !== "MODULE_NOT_FOUND") throw err;
     }
@@ -141,7 +143,7 @@ const router: FastifyPluginAsync = async (app) => {
       pricesRepo.latestQuotes([inst.id]),
     ]);
 
-    const out = { ...withBondDetails(inst), priceCoverage: coverage };
+    const out: Record<string, any> = { ...withBondDetails(inst), priceCoverage: coverage };
     const q = quotes.get(inst.id);
     if (q) {
       out.latestQuote = {
@@ -184,7 +186,7 @@ const router: FastifyPluginAsync = async (app) => {
     // vanno rigenerate: altrimenti il calendario mostrerebbe le vecchie.
     const bondFields = ["couponRate", "couponFrequency", "firstCouponDate", "maturityDate", "dayCount", "faceValue"];
     if (bondFields.some((f) => req.valid.body[f] !== undefined)) {
-      await regenerateProjected(updated);
+      await regenerateProjected(updated!);
     }
 
     return reply.send(withBondDetails(updated));
@@ -239,7 +241,7 @@ const router: FastifyPluginAsync = async (app) => {
       });
     }
 
-    return reply.send({ date: saved.date, close: saved.close, source: saved.source });
+    return reply.send({ date: saved!.date, close: saved!.close, source: saved!.source });
   });
 
   app.post("/:id/refresh", { preHandler: [params(z.object({ id: idParam() }))] }, async (req, reply) => {
@@ -252,7 +254,7 @@ const router: FastifyPluginAsync = async (app) => {
     }
     let jobId = null;
     try {
-      jobId = enqueueBackfill(inst.id, { force: true });
+      jobId = enqueueBackfill(inst.id, {});
     } catch (err) {
       if (errCode(err) !== "MODULE_NOT_FOUND") throw err;
     }

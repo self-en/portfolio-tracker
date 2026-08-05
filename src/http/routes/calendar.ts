@@ -12,6 +12,12 @@ import { notFound, conflict, validation } from "../errors";
 import { z, query, body, params, idParam, dateString } from "../validate";
 import * as schemas from "../schemas";
 import type { FastifyPluginAsync } from "fastify";
+import type Decimal from "decimal.js";
+import type { Numeric } from "../../domain/money";
+import type { InstrumentLike } from "../../domain/types";
+import type { IncomeEventWithInstrument } from "../../repo/events";
+import type { IncomeEvent } from "../../types";
+import type { TransactionInput } from "../../repo/transactions";
 
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -24,7 +30,7 @@ const today = () => new Date().toISOString().slice(0, 10);
  * - scheduled → calcolato dallo scadenzario cedolare (i BTP stanno tutti qui)
  * - estimated → importo dedotto, non dichiarato
  */
-function confidenceOf(ev) {
+function confidenceOf(ev: IncomeEventWithInstrument): string {
   if (ev.status === "PAID") return "paid";
   if (ev.status === "ANNOUNCED") return "announced";
   if (ev.source === "schedule") return "scheduled";
@@ -37,7 +43,11 @@ function confidenceOf(ev) {
  * Per le cedole `amount_per_unit` è per 100 di NOMINALE, per i dividendi è per
  * azione: confondere le due convenzioni sbaglia di un fattore 10 (docs/decisions.md §9).
  */
-function estimateGross(ev, instrument, quantityAtDate) {
+function estimateGross(
+  ev: IncomeEvent | IncomeEventWithInstrument,
+  instrument: InstrumentLike | null,
+  quantityAtDate: Numeric
+) {
   const qty = d(quantityAtDate);
   if (qty.isZero() || ev.amountPerUnit == null) return null;
 
@@ -92,28 +102,30 @@ const router: FastifyPluginAsync = async (app) => {
     const ledgerByInstrument = await txRepo.ledgerByInstrument({ portfolioId: portfolio.id });
 
     const currencies = [...new Set(events.map((e) => e.currency))].filter(
-      (c) => c && c !== portfolio.baseCcy
+      (c): c is string => !!c && c !== portfolio.baseCcy
     );
     const fxRates = await fxRepo.ratesAsOf(currencies, to, portfolio.baseCcy);
 
     // Serie di quantità per strumento sulle sole date che servono.
-    const qtyByInstrument = new Map();
+    const qtyByInstrument = new Map<number, Map<string, Decimal>>();
     for (const id of instrumentIds) {
       const txs = ledgerByInstrument.get(id) || [];
-      const dates = [...new Set(events.filter((e) => e.instrumentId === id).map((e) => e.payDate))].sort();
+        const dates = [...new Set(events.filter((e) => e.instrumentId === id).map((e) => e.payDate))]
+        .filter((d): d is string => !!d)
+        .sort();
       // Quantità "come transata", non aggiustata per gli split: una cedola si
       // incassa sulle quantità realmente possedute a quella data.
       const series = positions.splitAdjustedQuantitySeries(txs, dates);
-      qtyByInstrument.set(id, new Map(series.map((s, i) => [dates[i], s.raw])));
+      qtyByInstrument.set(id, new Map(series.map((s, i) => [dates[i] as string, s.raw])));
     }
 
-    const warnings = [];
-    const out = [];
-    const monthly = new Map();
+    const warnings: Array<Record<string, unknown>> = [];
+    const out: Array<Record<string, unknown>> = [];
+    const monthly = new Map<string, Record<string, any>>();
 
     for (const ev of events) {
       const inst = instruments.get(ev.instrumentId) || null;
-      const qtyAtDate = qtyByInstrument.get(ev.instrumentId)?.get(ev.payDate) ?? ZERO;
+      const qtyAtDate = qtyByInstrument.get(ev.instrumentId)?.get(ev.payDate ?? "") ?? ZERO;
       const gross = estimateGross(ev, inst, qtyAtDate);
 
       const fxRate = ev.currency === portfolio.baseCcy ? "1" : fxRates.get(ev.currency);
@@ -158,9 +170,12 @@ const router: FastifyPluginAsync = async (app) => {
       // rientra, non reddito, e sommarlo gonfierebbe il grafico di un ordine di
       // grandezza.
       if (grossBase !== null && ev.kind !== "REDEMPTION" && ev.kind !== "SPLIT") {
-        const key = cal.monthKey(ev.payDate);
-        if (!monthly.has(key)) monthly.set(key, { gross: ZERO, confirmed: ZERO, projected: ZERO });
-        const bucket = monthly.get(key);
+        const key = cal.monthKey(ev.payDate as string);
+        let bucket = monthly.get(key);
+        if (!bucket) {
+          bucket = { gross: ZERO, confirmed: ZERO, projected: ZERO };
+          monthly.set(key, bucket);
+        }
         bucket.gross = bucket.gross.plus(grossBase);
         if (ev.status === "PAID") bucket.confirmed = bucket.confirmed.plus(grossBase);
         else bucket.projected = bucket.projected.plus(grossBase);
@@ -268,11 +283,11 @@ const router: FastifyPluginAsync = async (app) => {
       tradeCcy: ev.currency,
       fxRate,
       note: input.note ?? `Confermato dal calendario (evento #${ev.id})`,
-    });
+    } as TransactionInput);
 
-    const updated = await eventsRepo.markPaid(ev.id, created.id);
+    const updated = await eventsRepo.markPaid(ev.id, created!.id);
     logger.info(
-      { eventId: ev.id, transactionId: created.id, type },
+      { eventId: ev.id, transactionId: created!.id, type },
       "[calendar] evento confermato e movimento creato"
     );
 

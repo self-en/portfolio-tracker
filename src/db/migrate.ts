@@ -4,23 +4,28 @@
 import crypto from "node:crypto";
 import migrations from "./migrations";
 import logger from "../logger";
+import type { Pool } from "pg";
 
 // Chiave arbitraria ma stabile: due pod che partono insieme devono contendersi lo
 // stesso lock.
 const MIGRATION_LOCK_KEY = 918273645;
 
-const sha256 = (s) => crypto.createHash("sha256").update(s, "utf8").digest("hex");
+const sha256 = (s: string): string => crypto.createHash("sha256").update(s, "utf8").digest("hex");
 
 /**
  * Applica le migrazioni non ancora applicate. Idempotente.
  * @returns {Promise<{applied: string[], skipped: string[], mismatched: string[]}>}
  */
-async function migrate(pool) {
+async function migrate(pool: Pool) {
   // Gli advisory lock di pg_advisory_lock sono SESSION-scoped: servono un client
   // dedicato tenuto per tutta la durata, non pool.query() (che può prendere un
   // client diverso per la lock e per la unlock, lasciando il lock appeso).
   const client = await pool.connect();
-  const result = { applied: [], skipped: [], mismatched: [] };
+  const result: { applied: string[]; skipped: string[]; mismatched: string[] } = {
+    applied: [],
+    skipped: [],
+    mismatched: [],
+  };
 
   try {
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
@@ -31,7 +36,7 @@ async function migrate(pool) {
       applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
 
     const { rows } = await client.query("SELECT version, checksum FROM schema_migrations");
-    const applied = new Map(rows.map((r) => [r.version, r.checksum]));
+    const applied = new Map<string, string>(rows.map((r) => [r.version as string, r.checksum as string]));
 
     for (const m of migrations) {
       const sum = sha256(m.sql);

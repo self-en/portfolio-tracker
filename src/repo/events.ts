@@ -7,14 +7,27 @@ import { query, withTransaction } from "../db/pool";
 import * as rows from "./rows";
 import { normalizeDate } from "../domain/calendar";
 import type { PoolClient } from "pg";
-import type { DateString, DecimalString } from "../types";
+import type { DateString, DecimalString, IncomeEvent } from "../types";
+
+/** Un evento con i pochi dati dello strumento che il calendario mostra accanto. */
+export interface IncomeEventWithInstrument extends IncomeEvent {
+  instrument: {
+    id: number;
+    name: string | null;
+    ticker: string | null;
+    isin: string | null;
+    assetClass: string | null;
+    faceValue: DecimalString | null;
+    quoteConvention: string | null;
+  };
+}
 
 export interface EventFilter {
   from?: DateString;
   to?: DateString;
   instrumentId?: number;
-  kind?: string;
-  status?: string;
+  kind?: string | string[];
+  status?: string | string[];
   portfolioId?: number;
 }
 
@@ -85,8 +98,8 @@ async function list({ from, to, instrumentId, kind, status, portfolioId }: Event
     params
   );
 
-  return r.map((row) => ({
-    ...rows.incomeEvent(row),
+  return r.map((row): IncomeEventWithInstrument => ({
+    ...(rows.incomeEvent(row) as IncomeEvent),
     instrument: {
       id: Number(row.instrument_id),
       name: row.instrument_name,

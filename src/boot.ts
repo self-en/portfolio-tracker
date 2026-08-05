@@ -17,7 +17,21 @@ import { errMessage, errStack } from "./util/err";
 // è più di quanto serva al job PreSync.
 const RETRY_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
 
-const state = {
+/** Lo stato del boot, letto da /api/system/status e dallo scheduler. */
+export interface BootState {
+  ready: boolean;
+  db: { configured: boolean; connected: boolean; error: string | null };
+  migrations: {
+    applied: string[];
+    pending: string[];
+    mismatched: string[];
+    error: string | null;
+  };
+  scheduler: { enabled: boolean; leader: boolean; lastRuns: Record<string, unknown> };
+  startedAt: string;
+}
+
+const state: BootState = {
   ready: false,
   db: { configured: config.db.configured, connected: false, error: null },
   migrations: { applied: [], pending: knownVersions(), mismatched: [], error: null },
@@ -25,7 +39,7 @@ const state = {
   startedAt: new Date().toISOString(),
 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 async function runMigrations() {
   const pool = getPool();
@@ -94,7 +108,7 @@ async function start() {
 
     // Scheduler (che include catch-up e reconciler quando è leader).
     try {
-      const { startScheduler } = await import("./market/scheduler");
+      const { startScheduler } = await import("./market/scheduler.js");
       const result = await startScheduler(state);
       state.scheduler.leader = !!result.leader;
     } catch (err) {
@@ -107,7 +121,7 @@ async function start() {
     // copertura prezzi senza aspettare un cron.
     if (!config.scheduler.enabled) {
       try {
-        const { reconcile } = await import("./market/refresher");
+        const { reconcile } = await import("./market/refresher.js");
         await reconcile();
       } catch (err) {
         logger.warn({ err: errMessage(err) }, "[boot] reconciler fallito (continuo)");

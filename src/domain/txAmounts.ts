@@ -127,7 +127,7 @@ function computeAmounts(input: TxLike, instrument: InstrumentLike | null = null)
     } else if (instrument?.couponFrequency && instrument?.maturityDate) {
       try {
         const settle = input.settleDate || input.tradeDate;
-        const acc = bonds.accruedInterest(instrument, settle);
+        const acc = bonds.accruedInterest(instrument, settle as string);
         // accruedPer100 è per 100 di nominale → importo = nominale × rateo/100.
         accrued = d(nominal ?? quantity.times(faceValue)).times(d(acc.accruedPer100)).div(100);
         autoAccrued = true;

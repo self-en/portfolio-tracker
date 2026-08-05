@@ -9,12 +9,12 @@ import logger from "./logger";
 
 const MIN_SECRET_LEN = 32;
 
-function bool(v, dflt = false) {
+function bool(v: string | undefined, dflt = false): boolean {
   if (v === undefined || v === "") return dflt;
   return v === "true" || v === "1" || v === "yes";
 }
 
-function int(v, dflt) {
+function int(v: string | undefined, dflt: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : dflt;
 }

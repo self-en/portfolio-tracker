@@ -10,9 +10,16 @@
 //   resolveSymbol(query)            -> [{ symbol, name, exchange, quoteType, currency, score }]
 import config from "../config";
 import { createYahooProvider } from "./yahooProvider";
+import type {
+  NormalizedBar,
+  NormalizedEvents,
+  NormalizedQuote,
+  NormalizedSearchHit,
+  UpcomingDividend,
+} from "./yahooProvider";
 
 /** Provider vuoto: nessuna chiamata di rete. È il comportamento per i bond. */
-function createManualProvider() {
+function createManualProvider(): MarketProvider {
   return {
     name: "manual",
     async getQuotes() {
@@ -33,9 +40,27 @@ function createManualProvider() {
   };
 }
 
-let cached = null;
+/**
+ * Il contratto che il resto dell'app usa. Dichiararlo qui e' cio' che rende il
+ * provider "manual" un sostituto legittimo di quello Yahoo invece di un oggetto
+ * che somiglia abbastanza.
+ */
+export interface MarketProvider {
+  name: string;
+  getQuotes(symbols: ReadonlyArray<string | null | undefined>): Promise<NormalizedQuote[]>;
+  getHistory(
+    symbol: string,
+    from: string,
+    to: string
+  ): Promise<{ currency: string | null; bars: NormalizedBar[]; events?: NormalizedEvents }>;
+  getCorporateActions(symbol: string, from: string, to: string): Promise<NormalizedEvents>;
+  getUpcomingDividend(symbol: string): Promise<UpcomingDividend | null>;
+  resolveSymbol(query: string): Promise<NormalizedSearchHit[]>;
+}
 
-function createProvider(cfg = config) {
+let cached: MarketProvider | null = null;
+
+function createProvider(cfg: typeof config = config): MarketProvider {
   if (cached) return cached;
   const name = (cfg.market?.provider || "yahoo").toLowerCase();
   if (name === "manual") {

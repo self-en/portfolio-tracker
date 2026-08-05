@@ -27,7 +27,15 @@ const today = () => new Date().toISOString().slice(0, 10);
  * Una sola funzione condivisa da summary/positions/allocation/returns, così le
  * quattro risposte non possono divergere.
  */
-async function loadValuation({ portfolioId, asOf, includeAccrued }) {
+async function loadValuation({
+  portfolioId,
+  asOf,
+  includeAccrued,
+}: {
+  portfolioId?: number | null;
+  asOf?: string;
+  includeAccrued?: boolean;
+}) {
   const portfolio = portfolioId
     ? await portfoliosRepo.byId(portfolioId)
     : await portfoliosRepo.first();
@@ -55,7 +63,7 @@ async function loadValuation({ portfolioId, asOf, includeAccrued }) {
   for (const [ccy, rows] of fxSeries) {
     fxLookups.set(ccy, cal.forwardFillLookup(rows, { valueKey: "rate" }));
   }
-  const fxLookup = (ccy, date) => {
+  const fxLookup = (ccy: string, date: string | null) => {
     if (!ccy || ccy === portfolio.baseCcy) return "1";
     const lk = fxLookups.get(ccy);
     const hit = lk ? lk(date) : null;
@@ -127,7 +135,10 @@ const router: FastifyPluginAsync = async (app) => {
     // TWR e XIRR hanno bisogno della serie storica: si costruisce sul range ALL,
     // perché sono metriche "dall'inizio".
     const earliest = await txRepo.earliestDate(portfolio.id);
-    let twr = { total: null, annualized: null };
+    let twr: { total: string | null; annualized: string | null; days?: number; segments?: number } = {
+      total: null,
+      annualized: null,
+    };
     let xirr = null;
 
     if (earliest) {
@@ -165,7 +176,7 @@ const router: FastifyPluginAsync = async (app) => {
       (r) => r.instrument.assetClass || "—",
       (r) => r.instrument.assetClass || "Non classificato"
     );
-    const byCurrency = valuation.allocate(valued.rows, (r) => r.currency, (r) => r.currency);
+    const byCurrency = valuation.allocate(valued.rows, (r: any) => r.currency, (r: any) => r.currency);
 
     return reply.send({
       asOf: ctx.asOf,
@@ -290,12 +301,12 @@ const router: FastifyPluginAsync = async (app) => {
     const ctx = await loadValuation({ portfolioId, asOf });
 
     const keyFns = {
-      assetClass: [(r) => r.instrument.assetClass || "—", (r) => r.instrument.assetClass || "Non classificato"],
-      currency: [(r) => r.currency, (r) => r.currency],
-      instrument: [(r) => r.instrument.id, (r) => r.instrument.name],
-      issuer: [(r) => r.instrument.issuer || "—", (r) => r.instrument.issuer || "Non indicato"],
+      assetClass: [(r: any) => r.instrument.assetClass || "—", (r: any) => r.instrument.assetClass || "Non classificato"],
+      currency: [(r: any) => r.currency, (r: any) => r.currency],
+      instrument: [(r: any) => r.instrument.id, (r: any) => r.instrument.name],
+      issuer: [(r: any) => r.instrument.issuer || "—", (r: any) => r.instrument.issuer || "Non indicato"],
     };
-    const [keyFn, labelFn] = keyFns[by];
+    const [keyFn, labelFn] = keyFns[by as keyof typeof keyFns];
     let groups = valuation.allocate(ctx.valued.rows, keyFn, labelFn);
 
     // L'allocazione per strumento sfonderebbe i cap della palette (≤3 tinte per le

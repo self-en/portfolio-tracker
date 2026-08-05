@@ -42,7 +42,7 @@ const router: FastifyPluginAsync = async (app) => {
       (e) => e.status !== "PROJECTED" || e.transactionId
     );
 
-    const dump = {
+    const dump: Record<string, any> = {
       format: "portfolio-tracker",
       version: FORMAT_VERSION,
       exportedAt: new Date().toISOString(),
@@ -92,7 +92,7 @@ const router: FastifyPluginAsync = async (app) => {
       );
     }
 
-    const stats = { portfolios: 0, instruments: 0, transactions: 0, events: 0, manualPrices: 0, skipped: [] };
+    const stats: Record<string, any> = { portfolios: 0, instruments: 0, transactions: 0, events: 0, manualPrices: 0, skipped: [] };
 
     // Tutto in UNA transazione: un import a metà lascerebbe movimenti orfani, che
     // è peggio di un import fallito. L'SQL vive in repo/importer.js; qui resta solo

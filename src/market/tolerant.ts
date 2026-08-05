@@ -9,16 +9,26 @@
 // Con, degrada a un warning nei log.
 import logger from "../logger";
 
-async function tolerant(label, fn) {
+/** La forma dell'errore di validazione di yahoo-finance2 che ci interessa. */
+interface YahooValidationError {
+  name?: string;
+  result?: unknown;
+  errors?: unknown[];
+}
+
+async function tolerant<T>(label: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    if (e?.name === "FailedYahooValidationError" && e.result !== undefined) {
+    const ve = e as YahooValidationError;
+    if (ve?.name === "FailedYahooValidationError" && ve.result !== undefined) {
       logger.warn(
-        { label, errors: (e.errors || []).slice(0, 3).map((x) => String(x).slice(0, 200)) },
+        { label, errors: (ve.errors || []).slice(0, 3).map((x) => String(x).slice(0, 200)) },
         "[market] drift schema yahoo — uso il risultato non validato"
       );
-      return e.result;
+      // Il payload coercito NON e' validato: e' esattamente il punto di questa
+      // funzione, e i normalizzatori a valle sono scritti per essere tolleranti.
+      return ve.result as T;
     }
     throw e;
   }

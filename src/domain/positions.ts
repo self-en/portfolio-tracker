@@ -86,7 +86,10 @@ function normalizeTx(tx: TxLike): NormalizedTx {
  * nominale = quantità × valore facciale. Passare per la quantità come se fosse un
  * numero di azioni sbaglierebbe di un fattore 1000.
  */
-function tradeGross(tx: NormalizedTx | TxLike, instrument?: InstrumentLike | null): Decimal {
+function tradeGross(
+  tx: Pick<TxLike, "quantity" | "price"> | NormalizedTx,
+  instrument?: InstrumentLike | null
+): Decimal {
   const q = d(tx.quantity);
   const p = d(tx.price);
   if (instrument && instrument.quoteConvention === "PCT_OF_NOMINAL") {

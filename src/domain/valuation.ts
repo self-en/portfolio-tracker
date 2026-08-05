@@ -9,6 +9,34 @@ import * as cal from "./calendar";
 import { netInvestedSeries } from "./returns";
 import * as positions from "./positions";
 import * as bondsMod from "./bonds";
+import type { Numeric } from "./money";
+import type { DateString, DecimalString } from "../types";
+import type { CashFlow, DomainWarning, InstrumentLike, SeriesPoint, TxLike } from "./types";
+
+/** Tutto cio' che serve per costruire la serie del valore: dati GIA' caricati. */
+export interface ValueSeriesArgs {
+  dates?: DateString[];
+  txsByInstrument?: Map<number, TxLike[]>;
+  instruments?: Map<number, InstrumentLike>;
+  /** Righe SPARSE ascendenti: il forward-fill lo fa questa funzione. */
+  pricesByInstrument?: Map<number, Array<{ date: DateString; close: DecimalString }>>;
+  fxByCcy?: Map<string, Array<{ date: DateString; rate: DecimalString }>>;
+  flows?: CashFlow[];
+  baseCcy?: string;
+  /** Somma il rateo obbligazionario al valore (tel quel invece di corso secco). */
+  includeAccrued?: boolean;
+}
+
+export interface ValuePositionsArgs {
+  asOf: DateString;
+  /** L'output di buildPositions(). */
+  built: { positions: Map<number, any>; warnings?: DomainWarning[] };
+  instruments?: Map<number, InstrumentLike>;
+  quotes?: Map<number, Record<string, unknown>>;
+  fxRates?: Map<string, DecimalString>;
+  baseCcy?: string;
+  includeAccrued?: boolean;
+}
 
 /**
  * Costruisce la serie del valore di portafoglio.
@@ -24,7 +52,7 @@ import * as bondsMod from "./bonds";
  * @param {boolean} [args.includeAccrued=false] somma il rateo obbligazionario al valore
  * @returns {{points: Array, warnings: Array}}
  */
-function valueSeries(args) {
+function valueSeries(args: ValueSeriesArgs) {
   const dates = args.dates || [];
   const instruments = args.instruments || new Map();
   const txsByInstrument = args.txsByInstrument || new Map();
@@ -33,15 +61,15 @@ function valueSeries(args) {
   const baseCcy = (args.baseCcy || "EUR").toUpperCase();
   const includeAccrued = !!args.includeAccrued;
 
-  const warnings = [];
-  if (dates.length === 0) return { points: [], warnings };
+  const warnings: DomainWarning[] = [];
+  if (dates.length === 0) return { points: [] as SeriesPoint[], warnings };
 
   // Lookup FX forward-fill, uno per valuta.
-  const fxLookups = new Map();
+  const fxLookups = new Map<string, ReturnType<typeof cal.forwardFillLookup>>();
   for (const [ccy, rows] of fxByCcy) {
     fxLookups.set(ccy.toUpperCase(), cal.forwardFillLookup(rows, { valueKey: "rate" }));
   }
-  const fxAt = (ccy, date) => {
+  const fxAt = (ccy: string | null | undefined, date: DateString) => {
     const c = (ccy || baseCcy).toUpperCase();
     if (c === baseCcy) return { value: "1", filled: false };
     const lk = fxLookups.get(c);
@@ -63,7 +91,7 @@ function valueSeries(args) {
     const costs = positions.costSeries(txs, dates, {
       baseCcy,
       instruments,
-      fxLookup: (c, date) => fxAt(c, date).value,
+      fxLookup: (c, date) => fxAt(c, date ?? "").value as Numeric,
     });
 
     const priceAt = cal.forwardFillLookup(pricesByInstrument.get(Number(instrumentId)) || [], {
@@ -97,16 +125,16 @@ function valueSeries(args) {
       const p = priceAt(date);
       const fxr = fxAt(ccy, date);
 
-      if (isBlank(p.value) || isBlank(fxr.value)) {
+      if (isBlank(p.value as Numeric) || isBlank(fxr.value as Numeric)) {
         // PREZZO (o cambio) MANCANTE. Contributo 0 al totale, ma il punto viene
         // marcato `partial`: uno zero silenzioso somiglia a un crollo del
         // portafoglio, non a un buco nei dati. È la peggior modalità di
         // fallimento dell'intera app (§5).
         partialFlags[i] = true;
-        const key = `${instrumentId}:${isBlank(p.value) ? "price" : "fx"}`;
+        const key = `${instrumentId}:${isBlank(p.value as Numeric) ? "price" : "fx"}`;
         if (!missingByInstrument.has(key)) {
           missingByInstrument.set(key, {
-            code: isBlank(p.value) ? "price_missing" : "fx_missing",
+            code: isBlank(p.value as Numeric) ? "price_missing" : "fx_missing",
             instrumentId: Number(instrumentId),
             instrumentName: inst.name || null,
             currency: ccy,
@@ -121,8 +149,8 @@ function valueSeries(args) {
         continue;
       }
 
-      const local = positions.positionValue(qty, p.value, inst);
-      totals[i].value = totals[i].value.plus(toBase(local, fxr.value));
+      const local = positions.positionValue(qty, p.value as Numeric, inst);
+      totals[i].value = totals[i].value.plus(toBase(local, fxr.value as Numeric));
 
       if (schedule) {
         const acc = bondsMod.accruedInterest({ ...inst, schedule }, date);
@@ -130,7 +158,7 @@ function valueSeries(args) {
           // Rateo per 100 di nominale → importo: nominale × rateo/100.
           const nominal = qty.times(d(inst.faceValue, 1));
           const accruedLocal = nominal.times(d(acc.accruedPer100)).div(100);
-          totals[i].accrued = totals[i].accrued.plus(toBase(accruedLocal, fxr.value));
+          totals[i].accrued = totals[i].accrued.plus(toBase(accruedLocal, fxr.value as Numeric));
         }
       }
     }
@@ -149,9 +177,9 @@ function valueSeries(args) {
   // Investito netto: seconda linea del grafico e input del TWR.
   const netInvested = args.flows
     ? netInvestedSeries(args.flows, dates)
-    : dates.map((date) => ({ date, netInvested: ZERO }));
+    : dates.map((date: DateString) => ({ date, netInvested: ZERO }));
 
-  const points = dates.map((date, i) => {
+  const points = dates.map((date: DateString, i: number) => {
     const value = includeAccrued ? totals[i].value.plus(totals[i].accrued) : totals[i].value;
     const ni = netInvested[i].netInvested;
     return {
@@ -175,7 +203,7 @@ function valueSeries(args) {
  *
  * @returns {{rows: Array, totals: object, warnings: Array}}
  */
-function valuePositions(args) {
+function valuePositions(args: ValuePositionsArgs) {
   const asOf = cal.normalizeDate(args.asOf);
   const built = args.built; // output di buildPositions
   const instruments = args.instruments || new Map();
@@ -184,8 +212,8 @@ function valuePositions(args) {
   const baseCcy = (args.baseCcy || "EUR").toUpperCase();
   const includeAccrued = !!args.includeAccrued;
 
-  const warnings = [...(built.warnings || [])];
-  const rows = [];
+  const warnings: DomainWarning[] = [...(built.warnings || [])];
+  const rows: Array<Record<string, any>> = [];
 
   for (const [instrumentId, p] of built.positions) {
     const inst = instruments.get(Number(instrumentId)) || {};
@@ -221,7 +249,7 @@ function valuePositions(args) {
     let accrued = ZERO;
     if (inst.assetClass === "BOND" && inst.couponFrequency && !p.quantity.isZero()) {
       try {
-        const acc = bondsMod.accruedInterest(inst, asOf);
+        const acc = bondsMod.accruedInterest(inst, asOf as DateString);
         const nominal = p.quantity.times(d(inst.faceValue, 1));
         accrued = toBase(nominal.times(d(acc.accruedPer100)).div(100), fxRate ?? "1");
       } catch {
@@ -292,7 +320,11 @@ function valuePositions(args) {
 }
 
 /** Raggruppa le righe valorizzate per una chiave, con pesi. */
-function allocate(rows, keyFn, labelFn) {
+function allocate<R extends Record<string, any>>(
+  rows: readonly R[],
+  keyFn: (r: R) => string,
+  labelFn: (r: R) => string
+) {
   const groups = new Map();
   let total = ZERO;
 

@@ -4,18 +4,19 @@
 // catena di calcolo e diventano STRINGHE arrotondate solo qui, all'uscita
 // (docs/decisions.md §1).
 import { money, qty, price as fmtPrice, fx as fmtFx, d, D } from "../domain/money";
+import type { Numeric } from "../domain/money";
 
 /** Frazione (0.1706) → stringa a 4 decimali. Le percentuali le fa la UI. */
-const pct = (v) =>
+const pct = (v: Numeric) =>
   v === null || v === undefined ? null : d(v).toDecimalPlaces(4, D.ROUND_HALF_EVEN).toFixed(4);
 
-const m = (v) => (v === null || v === undefined ? null : money(v));
-const q = (v) => (v === null || v === undefined ? null : qty(v));
-const p = (v) => (v === null || v === undefined ? null : fmtPrice(v));
-const f = (v) => (v === null || v === undefined ? null : fmtFx(v));
+const m = (v: Numeric) => (v === null || v === undefined ? null : money(v));
+const q = (v: Numeric) => (v === null || v === undefined ? null : qty(v));
+const p = (v: Numeric) => (v === null || v === undefined ? null : fmtPrice(v));
+const f = (v: Numeric) => (v === null || v === undefined ? null : fmtFx(v));
 
 /** Riga di posizione per GET /api/portfolio/positions. */
-function position(row) {
+function position(row: Record<string, any>) {
   const inst = row.instrument || {};
   return {
     instrument: {
@@ -64,7 +65,7 @@ function position(row) {
 }
 
 /** Totali per GET /api/portfolio/summary. */
-function summaryTotals(t) {
+function summaryTotals(t: Record<string, any>) {
   return {
     marketValue: m(t.marketValue),
     totalValue: m(t.totalValue),
@@ -82,7 +83,7 @@ function summaryTotals(t) {
   };
 }
 
-const seriesPoint = (pt) => ({
+const seriesPoint = (pt: Record<string, any>) => ({
   date: pt.date,
   value: m(pt.value),
   cost: m(pt.cost),
@@ -94,7 +95,7 @@ const seriesPoint = (pt) => ({
   partial: !!pt.partial,
 });
 
-const allocationGroup = (g) => ({
+const allocationGroup = (g: Record<string, any>) => ({
   key: String(g.key),
   label: g.label,
   marketValue: m(g.marketValue),

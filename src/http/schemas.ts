@@ -22,7 +22,8 @@ const DAY_COUNTS = ["ACT/ACT-ICMA", "30E/360", "ACT/365F", "ACT/360"];
 const COUPON_FREQUENCIES = [0, 1, 2, 4, 12];
 
 const nullableDate = () => dateString().nullish();
-const nullableDecimal = (opts) => decimalString(opts).nullish();
+const nullableDecimal = (opts: { positive?: boolean; nonNegative?: boolean } = {}) =>
+  decimalString(opts).nullish();
 
 /**
  * I DEFAULT NON VANNO NELLA FORMA BASE.
@@ -43,11 +44,15 @@ const nullableDecimal = (opts) => decimalString(opts).nullish();
  * di update resta pulito. `withDefaults` rende l'intenzione esplicita invece di
  * affidarla alla memoria di chi aggiunge il prossimo campo.
  */
-function withDefaults(shape, defaults) {
-  const out = { ...shape };
+function withDefaults(shape: z.ZodRawShape, defaults: Record<string, unknown>): z.ZodRawShape {
+  const out: Record<string, z.ZodTypeAny> = { ...(shape as Record<string, z.ZodTypeAny>) };
   for (const [key, value] of Object.entries(defaults)) {
-    if (!out[key]) throw new Error(`withDefaults: campo inesistente ${key}`);
-    out[key] = out[key].default(value);
+    const field = out[key];
+    if (!field) throw new Error(`withDefaults: campo inesistente ${key}`);
+    // Il tipo di .default() dipende dallo schema del campo, che qui e' noto solo
+    // a runtime (la shape arriva per parametro): il cast e' su un'operazione che
+    // zod garantisce su ogni schema, non su un'ipotesi sui dati.
+    out[key] = (field as z.ZodTypeAny).default(value);
   }
   return out;
 }
@@ -74,7 +79,7 @@ const instrumentBase = {
   couponFrequency: z
     .union([z.number(), z.string()])
     .transform((v) => Number(v))
-    .refine((v) => COUPON_FREQUENCIES.includes(v), "frequenza cedolare non valida (0, 1, 2, 4, 12)")
+    .refine((v: any) => COUPON_FREQUENCIES.includes(v), "frequenza cedolare non valida (0, 1, 2, 4, 12)")
     .nullish(),
   firstCouponDate: nullableDate(),
   maturityDate: nullableDate(),
@@ -90,14 +95,14 @@ const instrumentBase = {
  * database: un 422 con l'elenco dei campi è utile, un 23514 su un nome di
  * constraint non lo è.
  */
-function refineInstrument(schema) {
+function refineInstrument<S extends z.ZodTypeAny>(schema: S) {
   return schema
-    .refine((v) => v.ticker || v.isin, {
+    .refine((v: any) => v.ticker || v.isin, {
       message: "serve almeno un ticker o un ISIN",
       path: ["ticker"],
     })
     .refine(
-      (v) =>
+      (v: any) =>
         v.assetClass !== "BOND" ||
         (v.faceValue != null && v.couponFrequency != null && v.maturityDate != null),
       {
@@ -106,7 +111,7 @@ function refineInstrument(schema) {
       }
     )
     .refine(
-      (v) =>
+      (v: any) =>
         v.assetClass !== "BOND" ||
         v.couponFrequency === 0 ||
         (v.couponRate != null && v.firstCouponDate != null),
@@ -116,11 +121,11 @@ function refineInstrument(schema) {
       }
     )
     .refine(
-      (v) =>
+      (v: any) =>
         !v.firstCouponDate || !v.maturityDate || v.firstCouponDate <= v.maturityDate,
       { message: "la prima cedola non può cadere dopo la scadenza", path: ["firstCouponDate"] }
     )
-    .refine((v) => v.priceSource !== "yahoo" || v.assetClass !== "BOND" || v.ticker, {
+    .refine((v: any) => v.priceSource !== "yahoo" || v.assetClass !== "BOND" || v.ticker, {
       message:
         "le obbligazioni non hanno copertura di mercato: usa price_source 'manual' oppure indica un ticker",
       path: ["priceSource"],
@@ -166,19 +171,19 @@ const transactionBase = {
   externalRef: z.string().max(200).nullish(),
 };
 
-function refineTransaction(schema) {
+function refineTransaction<S extends z.ZodTypeAny>(schema: S) {
   return schema
     // FEE e TAX sono ammesse SENZA strumento: un bollo, un canone di custodia o
     // un'imposta di conto non appartengono a un titolo specifico, ed è il caso più
     // comune di commissione standalone. (La migrazione 003 allinea il CHECK del
     // database, che inizialmente li richiedeva.)
     .refine(
-      (v) =>
+      (v: any) =>
         ["DEPOSIT", "WITHDRAWAL", "FEE", "TAX"].includes(v.type) || v.instrumentId != null,
       { message: "questo tipo di movimento richiede uno strumento", path: ["instrumentId"] }
     )
     .refine(
-      (v) =>
+      (v: any) =>
         !["BUY", "SELL"].includes(v.type) ||
         ((v.quantity != null || v.nominal != null) && v.price != null),
       {
@@ -186,12 +191,12 @@ function refineTransaction(schema) {
         path: ["quantity"],
       }
     )
-    .refine((v) => v.type !== "SPLIT" || v.splitRatio != null, {
+    .refine((v: any) => v.type !== "SPLIT" || v.splitRatio != null, {
       message: "uno split richiede il rapporto di conversione",
       path: ["splitRatio"],
     })
     .refine(
-      (v) =>
+      (v: any) =>
         ![
           "DIVIDEND",
           "COUPON",
@@ -204,7 +209,7 @@ function refineTransaction(schema) {
         ].includes(v.type) || v.grossAmount != null,
       { message: "questo tipo di movimento richiede un importo lordo", path: ["grossAmount"] }
     )
-    .refine((v) => !v.settleDate || v.settleDate >= v.tradeDate, {
+    .refine((v: any) => !v.settleDate || v.settleDate >= v.tradeDate, {
       message: "la data di regolamento non può precedere quella di negoziazione",
       path: ["settleDate"],
     });

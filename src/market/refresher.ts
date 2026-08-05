@@ -25,6 +25,8 @@ import type { DateString } from "../types";
 /** Un job in coda. `kind` decide quale funzione lo esegue (vedi runJob). */
 export interface RefreshJob {
   kind: string;
+  /** Rifa' il backfill anche se la copertura sembra completa. */
+  force?: boolean;
   id?: string;
   instrumentId?: number;
   from?: DateString;
@@ -52,7 +54,7 @@ function enqueue(job: RefreshJob): string {
   const dup = queue.find((j) => j.kind === job.kind && j.instrumentId === job.instrumentId);
   if (dup) {
     logger.debug({ kind: job.kind, instrumentId: job.instrumentId }, "[refresher] job già in coda");
-    return dup.id;
+    return dup.id as string;
   }
   queue.push({ ...job, id });
   stats.enqueued += 1;
@@ -87,7 +89,7 @@ async function drain() {
 async function runJob(job: RefreshJob): Promise<void> {
   switch (job.kind) {
     case "backfill":
-      return backfillInstrument(job.instrumentId, job);
+      return backfillInstrument(job.instrumentId as number, job);
     case "quotes":
       return refreshQuotes();
     case "history":
@@ -133,14 +135,14 @@ async function backfillInstrument(instrumentId: number, opts: { from?: DateStrin
       daysAgo(365 * (config.market.backfillYears || 2));
 
     const provider = createProvider();
-    const history = await provider.getHistory(inst.ticker, from, today());
+    const history = await provider.getHistory(inst.ticker as string, from, today());
 
     const rowCount = await pricesRepo.upsertBars(instrumentId, history.bars, "yahoo");
 
     // Dividendi storici come income_events PAID: alimentano il calendario a
     // ritroso e permettono di riconciliare cosa è stato incassato.
     const events = [];
-    for (const d of history.events.dividends) {
+    for (const d of (history.events ?? { dividends: [], splits: [] }).dividends) {
       events.push({
         instrumentId,
         kind: "DIVIDEND",
@@ -152,7 +154,7 @@ async function backfillInstrument(instrumentId: number, opts: { from?: DateStrin
         source: "yahoo",
       });
     }
-    for (const s of history.events.splits) {
+    for (const s of (history.events ?? { dividends: [], splits: [] }).splits) {
       events.push({
         instrumentId,
         kind: "SPLIT",
@@ -241,13 +243,13 @@ async function refreshDailyCloses() {
 
     for (const inst of list) {
       try {
-        const history = await provider.getHistory(inst.ticker, from, today());
+        const history = await provider.getHistory(inst.ticker as string, from, today());
         total += await pricesRepo.upsertBars(inst.id, history.bars, "yahoo");
 
         // UNO SPLIT NUOVO invalida la serie in cache: il `close` di Yahoo è
         // retro-aggiustato, quindi le barre già salvate sono su una scala diversa da
         // quelle nuove. Si ri-scarica l'intero storico (docs/decisions.md §4).
-        for (const s of history.events.splits) {
+        for (const s of (history.events ?? { dividends: [], splits: [] }).splits) {
           await eventsRepo.upsert({
             instrumentId: inst.id,
             kind: "SPLIT",
@@ -327,7 +329,7 @@ async function refreshUpcomingEvents() {
     let n = 0;
     for (const inst of list) {
       try {
-        const up = await provider.getUpcomingDividend(inst.ticker);
+        const up = await provider.getUpcomingDividend(inst.ticker as string);
         if (!up || !up.payDate) continue;
         await eventsRepo.upsert({
           instrumentId: inst.id,
@@ -390,13 +392,13 @@ const enqueueBackfill = (instrumentId: number, opts: { from?: DateString } = {})
 function enqueueScope(scope: string): string[] {
   switch (scope) {
     case "quotes":
-      return enqueue({ kind: "quotes" });
+      return [enqueue({ kind: "quotes" })];
     case "history":
-      return enqueue({ kind: "history" });
+      return [enqueue({ kind: "history" })];
     case "fx":
-      return enqueue({ kind: "fx" });
+      return [enqueue({ kind: "fx" })];
     case "events":
-      return enqueue({ kind: "events" });
+      return [enqueue({ kind: "events" })];
     case "all": {
       const ids = [
         enqueue({ kind: "quotes" }),
@@ -404,7 +406,7 @@ function enqueueScope(scope: string): string[] {
         enqueue({ kind: "history" }),
         enqueue({ kind: "events" }),
       ];
-      return ids.join(",");
+      return ids;
     }
     default:
       throw new Error(`scope non valido: ${scope}`);
@@ -417,7 +419,9 @@ const status = () => ({
   ...stats,
   breaker: (() => {
     try {
-      return createProvider().breaker?.status ?? null;
+      // Il breaker esiste solo sul provider Yahoo: il manuale non ha upstream da
+  // proteggere, e null e' la risposta onesta.
+  return (createProvider() as { breaker?: { status: unknown } }).breaker?.status ?? null;
     } catch {
       return null;
     }

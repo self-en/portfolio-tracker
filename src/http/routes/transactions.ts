@@ -11,6 +11,7 @@ import * as schemas from "../schemas";
 import { errCode } from "../../util/err";
 import { enqueueBackfill } from "../../market/refresher";
 import type { FastifyPluginAsync } from "fastify";
+import type { DomainWarning, TxLike } from "../../domain/types";
 
 
 /**
@@ -21,7 +22,7 @@ import type { FastifyPluginAsync } from "fastify";
  * /preview, quindi ciò che l'utente vede nell'anteprima è esattamente ciò che verrà
  * scritto.
  */
-async function prepare(input) {
+async function prepare(input: Record<string, any>) {
   const portfolioId = input.portfolioId || (await portfoliosRepo.first())?.id;
   if (!portfolioId) throw validation("nessun portafoglio disponibile");
 
@@ -50,7 +51,7 @@ async function prepare(input) {
     fxSource = "base";
   }
 
-  const amounts = computeAmounts({ ...input, tradeCcy }, instrument);
+  const amounts = computeAmounts({ ...input, tradeCcy } as TxLike, instrument);
 
   const record = {
     portfolioId,
@@ -107,7 +108,7 @@ const router: FastifyPluginAsync = async (app) => {
           instrumentId: record.instrumentId,
         })
       ).filter((t) => excludeId === null || t.id !== Number(excludeId));
-      const instruments = new Map([[instrument.id, instrument]]);
+      const instruments = new Map([[instrument!.id, instrument!]]);
       // Id sentinella: deve ordinarsi DOPO qualsiasi transazione dello stesso
       // giorno, perché è l'operazione che l'utente sta per aggiungere.
       const PENDING_ID = Number.MAX_SAFE_INTEGER;
@@ -116,8 +117,8 @@ const router: FastifyPluginAsync = async (app) => {
         instruments,
       });
 
-      const b = before.positions.get(instrument.id);
-      const a = after.positions.get(instrument.id);
+      const b = before.positions.get(instrument!.id);
+      const a = after.positions.get(instrument!.id);
       resultingPosition = {
         quantityBefore: b ? fmtQty(b.quantity) : "0.00000000",
         quantityAfter: a ? fmtQty(a.quantity) : "0.00000000",
@@ -135,7 +136,7 @@ const router: FastifyPluginAsync = async (app) => {
         // L'id sentinella è un dettaglio interno: non deve finire nella risposta.
         // `pending: true` dice al form che il warning riguarda l'operazione in corso.
         const { txId, ...rest } = w;
-        warnings.push(txId === PENDING_ID ? { ...rest, pending: true } : w);
+        warnings.push((txId === PENDING_ID ? { ...rest, pending: true } : w) as DomainWarning);
       }
     }
 
@@ -160,11 +161,11 @@ const router: FastifyPluginAsync = async (app) => {
 
     // Una transazione più vecchia della copertura prezzi richiede di estendere il
     // backfill, altrimenti la serie storica parte con un buco.
-    if (created.instrumentId) {
+    if (created!.instrumentId) {
       try {
-        const coverage = await instrumentsRepo.priceCoverage(created.instrumentId);
-        if (!coverage.from || created.tradeDate < coverage.from) {
-          enqueueBackfill(created.instrumentId, { from: created.tradeDate });
+        const coverage = await instrumentsRepo.priceCoverage(created!.instrumentId);
+        if (!coverage.from || created!.tradeDate < coverage.from) {
+          enqueueBackfill(created!.instrumentId, { from: created!.tradeDate });
         }
       } catch (err) {
         if (errCode(err) !== "MODULE_NOT_FOUND") throw err;

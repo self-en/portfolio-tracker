@@ -24,6 +24,8 @@ export interface TxLike {
   type: string;
   tradeDate?: DateString | null;
   trade_date?: DateString | null;
+  settleDate?: DateString | null;
+  settle_date?: DateString | null;
   quantity?: Amount;
   price?: Amount;
   grossAmount?: Amount;
@@ -42,7 +44,8 @@ export interface TxLike {
   split_ratio?: Amount;
   /** Nominale indicato a mano su un'obbligazione (alternativo a quantity). */
   nominal?: Amount;
-  [key: string]: unknown;
+  /** Campi extra che il chiamante puo' portare (es. la riga arricchita di list()). */
+  instrument?: unknown;
 }
 
 /** La transazione dopo normalizeTx(): una sola forma, camelCase. */
@@ -76,7 +79,12 @@ export interface InstrumentLike {
   maturityDate?: DateString | null;
   dayCount?: string | null;
   assetClass?: string | null;
-  [key: string]: unknown;
+  /** Scadenzario gia' calcolato, quando il chiamante lo ha in mano. */
+  schedule?: unknown;
+  name?: string | null;
+  ticker?: string | null;
+  isin?: string | null;
+  priceSource?: string | null;
 }
 
 /**
@@ -86,16 +94,19 @@ export interface InstrumentLike {
  */
 export interface DomainWarning {
   code: string;
-  message: string;
+  message?: string;
   instrumentId?: number | null;
   txId?: number | null;
   currency?: Ccy | null;
   date?: DateString | null;
-  [key: string]: unknown;
+  details?: unknown;
+  instrumentName?: string | null;
+  ticker?: string | null;
+  priceDate?: DateString | null;
 }
 
 /** Tasso EUR->ccy alla data, dalla cache. null/'' = non disponibile. */
-export type FxLookup = (ccy: Ccy, date: DateString | null) => DecimalString | number | null | undefined;
+export type FxLookup = (ccy: Ccy, date: DateString | null) => Amount | undefined;
 
 /** Una posizione in costruzione: tutti gli importi sono Decimal, mai stringhe. */
 export interface Position {
@@ -119,8 +130,14 @@ export interface Position {
 
 /** Un flusso di cassa datato, in valuta base. Alimenta TWR e XIRR. */
 export interface CashFlow {
-  date: DateString;
-  amount: Decimal | DecimalString | number;
+  /** null quando la riga di origine non aveva una data valida: il consumatore filtra. */
+  date: DateString | null;
+  /**
+   * Un flusso porta l'importo in valuta di transazione (`amount`) o gia' convertito
+   * in base (`amountBase`): buildPositions produce il secondo, un import il primo, e
+   * i consumatori leggono `amountBase ?? amount`. Uno dei due c'e' sempre.
+   */
+  amount?: Decimal | DecimalString | number;
   /** Importo gia' convertito in valuta base, quando il produttore lo conosce. */
   amountBase?: Decimal | DecimalString | number | null;
   /** BUY/SELL/DIVIDEND/... - decide se il flusso e' capitale (vedi CAPITAL_TYPES). */
@@ -131,10 +148,12 @@ export interface CashFlow {
 /** Un punto di una serie temporale: valore alla data (null = non disponibile). */
 export interface SeriesPoint {
   date: DateString;
+  /** Valore in valuta base, quando il produttore lo espone con questo nome. */
+  valueBase?: Decimal | DecimalString | number | null;
   value: Decimal | DecimalString | number | null;
   /** true quando il punto e' stato calcolato con dati incompleti. */
   partial?: boolean;
-  [key: string]: unknown;
+  netInvested?: Decimal | DecimalString | number | null;
 }
 
 /** Un cashflow ridotto a "quanto" e "a quanti giorni dall'inizio": la forma su cui lavora XIRR. */
