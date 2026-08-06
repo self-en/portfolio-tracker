@@ -58,6 +58,121 @@ export interface UpcomingDividend {
 }
 
 /**
+ * I fondamentali per l'analisi di bilancio. Tutti i numerici sono STRINGHE e ogni
+ * campo è nullable: `quoteSummary` omette i moduli assenti e riempie di `null` i
+ * campi che non ha (verificato — vedi la nota su `normalizeFundamentals`).
+ *
+ * `modules` non è decorativo: è l'elenco dei moduli che Yahoo ha DAVVERO
+ * restituito, e diventa l'elenco dei dati mancanti mostrato all'utente. Un'analisi
+ * che non dichiara su cosa NON ha potuto lavorare è peggiore di nessuna analisi.
+ */
+export interface NormalizedFundamentals {
+  symbol: string;
+  /** Valuta del BILANCIO (`financialCurrency`): può differire da quella di quotazione. */
+  currency: string | null;
+  /** Fine del trimestre più recente incorporato nei dati. */
+  asOf: DateString | null;
+  modules: string[];
+  profile: {
+    sector: string | null;
+    industry: string | null;
+    country: string | null;
+    employees: string | null;
+    website: string | null;
+    summary: string | null;
+  } | null;
+  valuation: {
+    marketCap: string | null;
+    enterpriseValue: string | null;
+    trailingPe: string | null;
+    forwardPe: string | null;
+    priceToBook: string | null;
+    priceToSales: string | null;
+    enterpriseToRevenue: string | null;
+    enterpriseToEbitda: string | null;
+    pegRatio: string | null;
+    bookValue: string | null;
+    trailingEps: string | null;
+    forwardEps: string | null;
+    beta: string | null;
+  };
+  profitability: {
+    grossMargins: string | null;
+    operatingMargins: string | null;
+    ebitdaMargins: string | null;
+    profitMargins: string | null;
+    returnOnEquity: string | null;
+    returnOnAssets: string | null;
+    revenueGrowth: string | null;
+    earningsGrowth: string | null;
+  };
+  balance: {
+    totalRevenue: string | null;
+    grossProfits: string | null;
+    ebitda: string | null;
+    netIncomeToCommon: string | null;
+    totalCash: string | null;
+    totalCashPerShare: string | null;
+    totalDebt: string | null;
+    debtToEquity: string | null;
+    currentRatio: string | null;
+    quickRatio: string | null;
+    freeCashflow: string | null;
+    operatingCashflow: string | null;
+    sharesOutstanding: string | null;
+  };
+  dividend: {
+    rate: string | null;
+    yield: string | null;
+    payoutRatio: string | null;
+    fiveYearAvgYield: string | null;
+    exDate: DateString | null;
+    lastValue: string | null;
+    lastDate: DateString | null;
+  };
+  /** Ricavi/utili/margine per esercizio: il TREND, che è il dato più utile di tutto il blocco. */
+  yearly: Array<{ year: string; revenue: string | null; earnings: string | null; profitMargin: string | null }>;
+  /** `incomeStatementHistory`: spesso parziale (vedi la nota), quindi si tiene solo ciò che porta valore. */
+  statements: Array<{
+    endDate: DateString | null;
+    totalRevenue: string | null;
+    grossProfit: string | null;
+    operatingIncome: string | null;
+    netIncome: string | null;
+  }>;
+  analysts: {
+    recommendationKey: string | null;
+    recommendationMean: string | null;
+    opinions: string | null;
+    targetLow: string | null;
+    targetMean: string | null;
+    targetHigh: string | null;
+    trend: Array<{ period: string; strongBuy: number; buy: number; hold: number; sell: number; strongSell: number }>;
+  };
+  /** Presente solo per fondi ed ETF: costi, replica, composizione. */
+  fund: {
+    family: string | null;
+    legalType: string | null;
+    expenseRatio: string | null;
+    turnover: string | null;
+    totalNetAssets: string | null;
+    inceptionDate: DateString | null;
+    stockPosition: string | null;
+    bondPosition: string | null;
+    cashPosition: string | null;
+    topHoldings: Array<{ symbol: string | null; name: string | null; weight: string | null }>;
+    sectorWeightings: Array<{ sector: string; weight: string | null }>;
+  } | null;
+  range52w: {
+    low: string | null;
+    high: string | null;
+    fiftyDayAverage: string | null;
+    twoHundredDayAverage: string | null;
+    change52w: string | null;
+  };
+}
+
+/**
  * Adapter pino per il logger della libreria.
  *
  * OBBLIGATORIO: il logger di DEFAULT di yahoo-finance2 è `console.log/warn/error/dir`,
@@ -241,6 +356,225 @@ function normalizeUpcomingDividend(summary: RawPayload): UpcomingDividend | null
   if (!exDate && !payDate) return null;
   const amountPerUnit = numStr(summary?.summaryDetail?.dividendRate);
   return { exDate, payDate: payDate || exDate, amountPerUnit };
+}
+
+/**
+ * Come `numStr`, ma lo ZERO diventa `null`.
+ *
+ * Serve SOLO alle voci del conto economico, e non è pignoleria: nella fixture reale
+ * AAPL riporta `grossProfit: 0` e `totalOperatingExpenses: 0` su un esercizio da 416
+ * miliardi di ricavi. Quello zero è il segnaposto di Yahoo per "non pubblicato", e
+ * passarlo a un modello significherebbe dirgli che il margine lordo è zero — un dato
+ * sbagliato è molto peggio di un dato assente (docs/decisions.md §5).
+ *
+ * Un ricavo o un utile lordo davvero pari a zero è un caso che non esiste in una
+ * società quotata; se un giorno esistesse, comparirebbe come lacuna dichiarata.
+ */
+function absentIfZero(v: unknown): string | null {
+  const s = numStr(v);
+  if (s === null) return null;
+  return Number(s) === 0 ? null : s;
+}
+
+/** I moduli di `quoteSummary` che servono all'analisi di bilancio. */
+const FUNDAMENTAL_MODULES = [
+  "assetProfile",
+  "summaryProfile",
+  "summaryDetail",
+  "defaultKeyStatistics",
+  "financialData",
+  "incomeStatementHistory",
+  "balanceSheetHistory",
+  "cashflowStatementHistory",
+  "earnings",
+  "recommendationTrend",
+  "fundProfile",
+  "topHoldings",
+] as const;
+
+/**
+ * Fondamentali da `quoteSummary`.
+ *
+ * DUE COSE VERIFICATE SUL PAYLOAD REALE (fixture
+ * `quoteSummary-fundamentals-AAPL.json`, catturata da Yahoo), che decidono la forma
+ * di questa funzione:
+ *
+ * 1. **`balanceSheetHistory` è VUOTO**: gli statement contengono `endDate` e nulla
+ *    più — niente `totalAssets`, niente `totalLiab`, niente patrimonio netto. Anche
+ *    `cashflowStatementHistory` porta solo `netIncome`, e in
+ *    `incomeStatementHistory` metà delle voci è `null` o `0` (per AAPL:
+ *    `grossProfit: 0`, `operatingIncome: null`). Lo stato patrimoniale "vero" da
+ *    questa API non esiste più.
+ *    Quindi l'analisi di bilancio NON si appoggia agli statement: la sostanza sta in
+ *    `financialData` (indebitamento, liquidità, ratio correnti, margini, ROE/ROA,
+ *    flussi di cassa) e in `defaultKeyStatistics` (patrimonio per azione, multipli).
+ *    Gli statement si tengono comunque, perché ciò che c'è è reale e perché il
+ *    giorno in cui Yahoo tornasse a popolarli il codice li mostra senza modifiche.
+ * 2. **Su un ETF i moduli aziendali sono ASSENTI, non vuoti** (EUNL.DE non ha
+ *    `financialData` né `incomeStatementHistory`): al loro posto arrivano
+ *    `fundProfile` (TER!) e `topHoldings`. È il motivo per cui `modules` viaggia
+ *    nella risposta.
+ */
+function normalizeFundamentals(symbol: string, summary: RawPayload): NormalizedFundamentals {
+  const fd: RawPayload = summary?.financialData || {};
+  const ks: RawPayload = summary?.defaultKeyStatistics || {};
+  const sd: RawPayload = summary?.summaryDetail || {};
+  const prof: RawPayload = summary?.assetProfile || summary?.summaryProfile || null;
+  const fp: RawPayload = summary?.fundProfile || null;
+  const th: RawPayload = summary?.topHoldings || null;
+
+  const yearlyRaw: RawPayload[] = Array.isArray(summary?.earnings?.financialsChart?.yearly)
+    ? summary.earnings.financialsChart.yearly
+    : [];
+  const stmtRaw: RawPayload[] = Array.isArray(summary?.incomeStatementHistory?.incomeStatementHistory)
+    ? summary.incomeStatementHistory.incomeStatementHistory
+    : [];
+  const trendRaw: RawPayload[] = Array.isArray(summary?.recommendationTrend?.trend)
+    ? summary.recommendationTrend.trend
+    : [];
+
+  // Un profilo con solo il telefono NON è un profilo: sull'ETF `assetProfile`
+  // esiste ma contiene `{phone, companyOfficers: [], maxAge}`, e riportarlo
+  // farebbe credere all'analisi di avere un contesto qualitativo che non ha.
+  const hasProfile = !!(prof && (prof.sector || prof.industry || prof.longBusinessSummary));
+
+  const fund = fp || th
+    ? {
+        family: fp?.family ?? ks.fundFamily ?? null,
+        legalType: fp?.legalType ?? ks.legalType ?? null,
+        expenseRatio: numStr(fp?.feesExpensesInvestment?.annualReportExpenseRatio),
+        turnover: numStr(fp?.feesExpensesInvestment?.annualHoldingsTurnover),
+        totalNetAssets: numStr(fp?.feesExpensesInvestment?.totalNetAssets),
+        inceptionDate: dateStr(ks.fundInceptionDate),
+        stockPosition: numStr(th?.stockPosition),
+        bondPosition: numStr(th?.bondPosition),
+        cashPosition: numStr(th?.cashPosition),
+        topHoldings: (Array.isArray(th?.holdings) ? th.holdings : []).map((h: RawPayload) => ({
+          symbol: h?.symbol || null,
+          name: h?.holdingName || null,
+          weight: numStr(h?.holdingPercent),
+        })),
+        // `sectorWeightings` è un array di oggetti a UNA chiave
+        // (`[{realestate: 0.0169}, {technology: 0.27}]`), non una mappa: verificato.
+        sectorWeightings: (Array.isArray(th?.sectorWeightings) ? th.sectorWeightings : []).flatMap(
+          (w: RawPayload) =>
+            Object.entries(w || {}).map(([sector, weight]) => ({ sector, weight: numStr(weight) }))
+        ),
+      }
+    : null;
+
+  return {
+    symbol,
+    currency: fd.financialCurrency || summary?.earnings?.financialCurrency || null,
+    asOf: dateStr(ks.mostRecentQuarter),
+    // Solo i moduli DAVVERO presenti: è la lista da cui la UI ricava i dati mancanti.
+    modules: FUNDAMENTAL_MODULES.filter((m) => summary?.[m] !== undefined && summary?.[m] !== null),
+    profile: hasProfile
+      ? {
+          sector: prof.sectorDisp || prof.sector || null,
+          industry: prof.industryDisp || prof.industry || null,
+          country: prof.country || null,
+          employees: numStr(prof.fullTimeEmployees),
+          website: prof.website || null,
+          // Il riassunto dell'attività è prosa lunga: si tronca, perché entra in un
+          // prompt a pagamento e le prime righe portano quasi tutta l'informazione.
+          summary: typeof prof.longBusinessSummary === "string" ? prof.longBusinessSummary.slice(0, 1200) : null,
+        }
+      : null,
+    valuation: {
+      marketCap: numStr(sd.marketCap),
+      enterpriseValue: numStr(ks.enterpriseValue),
+      trailingPe: numStr(sd.trailingPE),
+      forwardPe: numStr(sd.forwardPE ?? ks.forwardPE),
+      priceToBook: numStr(ks.priceToBook),
+      priceToSales: numStr(sd.priceToSalesTrailing12Months),
+      enterpriseToRevenue: numStr(ks.enterpriseToRevenue),
+      enterpriseToEbitda: numStr(ks.enterpriseToEbitda),
+      pegRatio: numStr(ks.pegRatio),
+      bookValue: numStr(ks.bookValue),
+      trailingEps: numStr(ks.trailingEps),
+      forwardEps: numStr(ks.forwardEps),
+      beta: numStr(sd.beta ?? ks.beta),
+    },
+    profitability: {
+      grossMargins: numStr(fd.grossMargins),
+      operatingMargins: numStr(fd.operatingMargins),
+      ebitdaMargins: numStr(fd.ebitdaMargins),
+      profitMargins: numStr(fd.profitMargins ?? ks.profitMargins),
+      returnOnEquity: numStr(fd.returnOnEquity),
+      returnOnAssets: numStr(fd.returnOnAssets),
+      revenueGrowth: numStr(fd.revenueGrowth),
+      earningsGrowth: numStr(fd.earningsGrowth),
+    },
+    balance: {
+      totalRevenue: numStr(fd.totalRevenue),
+      grossProfits: numStr(fd.grossProfits),
+      ebitda: numStr(fd.ebitda),
+      netIncomeToCommon: numStr(ks.netIncomeToCommon),
+      totalCash: numStr(fd.totalCash),
+      totalCashPerShare: numStr(fd.totalCashPerShare),
+      totalDebt: numStr(fd.totalDebt),
+      // `debtToEquity` di Yahoo è in PERCENTUALE (78.445 = 78,4%), non un multiplo:
+      // passa così com'è e il prompt lo dichiara, invece di dividerlo per 100 qui e
+      // dover ricordare a valle che è già stato diviso.
+      debtToEquity: numStr(fd.debtToEquity),
+      currentRatio: numStr(fd.currentRatio),
+      quickRatio: numStr(fd.quickRatio),
+      freeCashflow: numStr(fd.freeCashflow),
+      operatingCashflow: numStr(fd.operatingCashflow),
+      sharesOutstanding: numStr(ks.sharesOutstanding),
+    },
+    dividend: {
+      rate: numStr(sd.dividendRate),
+      yield: numStr(sd.dividendYield),
+      payoutRatio: numStr(sd.payoutRatio),
+      fiveYearAvgYield: numStr(sd.fiveYearAvgDividendYield),
+      exDate: dateStr(sd.exDividendDate),
+      lastValue: numStr(ks.lastDividendValue),
+      lastDate: dateStr(ks.lastDividendDate),
+    },
+    yearly: yearlyRaw
+      .filter((y) => y && y.date !== undefined && y.date !== null)
+      .map((y) => ({
+        year: String(y.date),
+        revenue: numStr(y.revenue),
+        earnings: numStr(y.earnings),
+        profitMargin: numStr(y.profitMargin),
+      })),
+    statements: stmtRaw.map((s) => ({
+      endDate: dateStr(s?.endDate),
+      totalRevenue: absentIfZero(s?.totalRevenue),
+      grossProfit: absentIfZero(s?.grossProfit),
+      operatingIncome: absentIfZero(s?.operatingIncome),
+      netIncome: absentIfZero(s?.netIncome),
+    })),
+    analysts: {
+      recommendationKey: fd.recommendationKey || null,
+      recommendationMean: numStr(fd.recommendationMean),
+      opinions: numStr(fd.numberOfAnalystOpinions),
+      targetLow: numStr(fd.targetLowPrice),
+      targetMean: numStr(fd.targetMeanPrice),
+      targetHigh: numStr(fd.targetHighPrice),
+      trend: trendRaw
+        .filter((t) => t && typeof t.period === "string")
+        .map((t) => ({
+          period: t.period,
+          strongBuy: Number(t.strongBuy) || 0,
+          buy: Number(t.buy) || 0,
+          hold: Number(t.hold) || 0,
+          sell: Number(t.sell) || 0,
+          strongSell: Number(t.strongSell) || 0,
+        })),
+    },
+    fund,
+    range52w: {
+      low: numStr(sd.fiftyTwoWeekLow),
+      high: numStr(sd.fiftyTwoWeekHigh),
+      fiftyDayAverage: numStr(sd.fiftyDayAverage),
+      twoHundredDayAverage: numStr(sd.twoHundredDayAverage),
+      change52w: numStr(ks["52WeekChange"]),
+    },
+  };
 }
 
 // --- Backoff + circuit breaker ---
@@ -451,6 +785,18 @@ function createYahooProvider(cfg?: unknown) {
       return normalizeUpcomingDividend(summary);
     },
 
+    /**
+     * Fondamentali per l'analisi di bilancio. UNA chiamata, molti moduli: Yahoo
+     * omette in silenzio quelli che non ha, quindi chiederne dodici e normalizzare
+     * ciò che torna costa una richiesta sola invece di dodici tentativi.
+     */
+    async getFundamentals(symbol: string): Promise<NormalizedFundamentals> {
+      const summary: RawPayload = await call(`quoteSummary-fundamentals ${symbol}`, () =>
+        yf.quoteSummary(symbol, { modules: [...FUNDAMENTAL_MODULES] as any })
+      );
+      return normalizeFundamentals(symbol, summary);
+    },
+
     async resolveSymbol(query: string): Promise<NormalizedSearchHit[]> {
       const result: RawPayload = await call(`search ${query}`, () => yf.search(query));
       return normalizeSearch(result);
@@ -467,7 +813,10 @@ export {
   normalizeEvents,
   normalizeSearch,
   normalizeUpcomingDividend,
+  normalizeFundamentals,
+  FUNDAMENTAL_MODULES,
   numStr,
+  absentIfZero,
   dateStr,
   isoStr,
   CircuitBreaker,

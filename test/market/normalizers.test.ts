@@ -466,6 +466,103 @@ test("pinoAdapter non lancia su oggetti circolari", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fondamentali (analisi di bilancio)
+// ---------------------------------------------------------------------------
+
+test("normalizeFundamentals su AAPL: i rapporti di bilancio ci sono, gli statement NO", () => {
+  const f = yp.normalizeFundamentals("AAPL", fixture("yahoo/quoteSummary-fundamentals-AAPL.json"));
+
+  assert.equal(f.symbol, "AAPL");
+  assert.equal(f.currency, "USD", "la valuta del BILANCIO, non quella di quotazione");
+  assert.equal(f.asOf, "2026-06-27", "fine del trimestre più recente");
+
+  // La sostanza dell'analisi di bilancio: indebitamento, liquidità, flussi, margini.
+  assert.equal(f.balance.totalDebt, "84343996416");
+  assert.equal(f.balance.totalCash, "62399000576");
+  assert.equal(f.balance.debtToEquity, "78.445", "arriva in PERCENTUALE dal provider");
+  assert.equal(f.balance.currentRatio, "1.003");
+  assert.equal(f.balance.freeCashflow, "107721875456");
+  assert.equal(f.profitability.grossMargins, "0.48653");
+  assert.equal(f.profitability.returnOnEquity, "1.4875101");
+  assert.equal(f.valuation.trailingPe, "35.841927");
+  assert.equal(f.valuation.priceToBook, "42.416195");
+  assert.equal(f.dividend.payoutRatio, "0.1204");
+  assert.equal(f.range52w.high, "344.57");
+  assert.equal(f.range52w.change52w, "0.37899375", "la chiave del provider è '52WeekChange'");
+
+  // Il TREND: quattro esercizi di ricavi e utili. È il pezzo più utile del blocco.
+  assert.equal(f.yearly.length, 4);
+  assert.deepEqual(f.yearly[3], {
+    year: "2025",
+    revenue: "416161000000",
+    earnings: "112010000000",
+    profitMargin: "0.26915064",
+  });
+
+  // VERIFICATO SUL PAYLOAD REALE: Yahoo non pubblica più lo stato patrimoniale voce
+  // per voce, e nel conto economico metà delle righe è 0 o null. Il normalizzatore
+  // non deve fingere il contrario — è la ragione per cui l'analisi si appoggia ai
+  // rapporti e dichiara la lacuna.
+  assert.equal(f.statements.length, 4);
+  assert.equal(f.statements[0].totalRevenue, "416161000000");
+  assert.equal(f.statements[0].grossProfit, null, "0 dal provider → null, non uno zero finto");
+  assert.equal(f.statements[0].operatingIncome, null);
+
+  assert.equal(must(f.profile, "il profilo").sector, "Technology");
+  assert.equal(must(f.profile, "il profilo").employees, "150000");
+  assert.ok(must(must(f.profile, "il profilo").summary, "la descrizione").length <= 1200, "prosa troncata");
+
+  assert.equal(f.analysts.recommendationKey, "buy");
+  assert.equal(f.analysts.opinions, "41");
+  assert.equal(f.analysts.trend[0].hold, 13);
+
+  assert.equal(f.fund, null, "un'azione non ha dati di fondo");
+  assert.ok(f.modules.includes("financialData"));
+  assert.ok(f.modules.includes("balanceSheetHistory"));
+});
+
+test("normalizeFundamentals su un ETF: moduli aziendali ASSENTI, dati di fondo presenti", () => {
+  const f = yp.normalizeFundamentals("EUNL.DE", fixture("yahoo/quoteSummary-fundamentals-EUNL.DE.json"));
+
+  // Su un ETF `financialData` e `incomeStatementHistory` non arrivano affatto: è la
+  // differenza tra "assente" e "vuoto", e `modules` la rende visibile a valle.
+  assert.equal(f.modules.includes("financialData"), false);
+  assert.equal(f.modules.includes("incomeStatementHistory"), false);
+  assert.equal(f.balance.totalDebt, null);
+  assert.equal(f.yearly.length, 0);
+  assert.equal(f.valuation.trailingPe, null);
+
+  // `assetProfile` c'è ma contiene solo il telefono: NON è un profilo, e riportarlo
+  // farebbe credere all'analisi di avere un contesto qualitativo che non ha.
+  assert.equal(f.profile, null);
+
+  const fund = must(f.fund, "i dati di fondo");
+  assert.equal(fund.expenseRatio, "0.002", "TER come frazione: 0,20% annuo");
+  assert.equal(fund.legalType, "Exchange Traded Fund");
+  assert.equal(fund.family, "BlackRock Asset Management Ireland - ETF");
+  assert.equal(fund.inceptionDate, "2023-07-28");
+  assert.equal(fund.stockPosition, "0.99660003");
+  assert.equal(fund.topHoldings.length, 10);
+  assert.deepEqual(fund.topHoldings[0], { symbol: "NVDA", name: "NVIDIA Corp", weight: "0.0517105" });
+  // `sectorWeightings` è un array di oggetti a UNA chiave, non una mappa.
+  assert.equal(fund.sectorWeightings.length, 11);
+  assert.deepEqual(fund.sectorWeightings[0], { sector: "realestate", weight: "0.016900001" });
+});
+
+test("normalizeFundamentals non lancia su un payload vuoto o assurdo", () => {
+  // Il drift di Yahoo è il caso normale, non l'eccezione: un payload sorpresa deve
+  // dare un oggetto povero, non un TypeError a metà di un'analisi a pagamento.
+  for (const payload of [null, undefined, {}, { financialData: null }, { earnings: 7 }, []]) {
+    const f = yp.normalizeFundamentals("X", payload);
+    assert.equal(f.symbol, "X");
+    assert.deepEqual(f.yearly, []);
+    assert.deepEqual(f.statements, []);
+    assert.equal(f.profile, null);
+    assert.equal(f.fund, null);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Confine architetturale
 // ---------------------------------------------------------------------------
 

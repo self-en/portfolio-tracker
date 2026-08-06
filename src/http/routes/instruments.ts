@@ -2,6 +2,7 @@ import logger from "../../logger";
 import * as instrumentsRepo from "../../repo/instruments";
 import * as pricesRepo from "../../repo/prices";
 import * as eventsRepo from "../../repo/events";
+import * as analysesRepo from "../../repo/analyses";
 import * as bonds from "../../domain/bonds";
 import { money } from "../../domain/money";
 import { notFound, conflict, validation } from "../errors";
@@ -82,12 +83,29 @@ async function regenerateProjected(inst: Instrument) {
 const router: FastifyPluginAsync = async (app) => {
   app.get("/", { preHandler: [query(schemas.listInstrumentsQuery)] }, async (req, reply) => {
     const list = await instrumentsRepo.list(req.valid.query);
-    const quotes = await pricesRepo.latestQuotes(list.map((i) => i.id));
+    const ids = list.map((i) => i.id);
+    // Una query per tutta la lista, non una per riga: l'ultima analisi serve alla
+    // colonna "Analisi" della pagina strumenti.
+    const [quotes, analyses] = await Promise.all([
+      pricesRepo.latestQuotes(ids),
+      analysesRepo.latestForMany(ids),
+    ]);
     return reply.send({
       items: list.map((i) => {
         const q = quotes.get(i.id);
+        const a = analyses.get(i.id);
         return {
           ...withBondDetails(i),
+          // Solo il verdetto e la data: la scheda intera si legge nel dettaglio.
+          latestAnalysis: a
+            ? {
+                id: a.id,
+                verdict: a.verdict,
+                confidence: a.confidence,
+                headline: a.headline,
+                createdAt: a.createdAt,
+              }
+            : null,
           latestQuote: q
             ? {
                 price: q.price,

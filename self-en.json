@@ -87,6 +87,40 @@
       "description": "Es. Europe/Rome: decide a che ora locale girano i job."
     },
     {
+      "key": "ANTHROPIC_API_KEY",
+      "label": "Chiave API di Anthropic (analisi con Claude)",
+      "description": "Abilita l'analisi di bilancio degli strumenti. Senza, il pulsante resta spento e il resto dell'app funziona come prima. Ogni analisi e' una chiamata a pagamento.",
+      "required": false,
+      "secret": true
+    },
+    {
+      "key": "ANALYSIS_MODEL",
+      "label": "Modello usato per l'analisi",
+      "required": false,
+      "secret": false,
+      "description": "Default claude-opus-5: e' il modello per cui i prompt sono scritti. Cambiarlo senza rileggerli e' un esperimento, non una configurazione."
+    },
+    {
+      "key": "ANALYSIS_EFFORT",
+      "label": "Profondita' di ragionamento dell'analisi",
+      "required": false,
+      "secret": false,
+      "description": "low, medium, high (default), xhigh o max. Piu' alto = analisi piu' approfondita, piu' lenta e piu' costosa."
+    },
+    {
+      "key": "ANALYSIS_TIMEOUT_MS",
+      "label": "Timeout di un'analisi (ms)",
+      "required": false,
+      "secret": false
+    },
+    {
+      "key": "ANALYSIS_RATE_LIMIT",
+      "label": "Analisi consentite all'ora",
+      "required": false,
+      "secret": false,
+      "description": "Protegge dalla spesa involontaria: ogni analisi e' una chiamata a pagamento. Default 20."
+    },
+    {
       "key": "LOGIN_ATTEMPTS",
       "label": "Tentativi di login consentiti",
       "required": false,

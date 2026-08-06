@@ -1197,3 +1197,141 @@ section.card {
     border-left: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Analisi con Claude
+   Aggiunte in fondo: nessun token nuovo, si riusano quelli esistenti
+   (--up / --down / --warn-* / --danger-* / --accent), così il tema scuro e
+   quello chiaro non hanno bisogno di essere toccati in tre posti.
+   --------------------------------------------------------------------------- */
+
+.analysis-toolbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+}
+
+.analysis-toolbar .card-title {
+  margin-bottom: 0;
+}
+
+.analysis-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0;
+}
+
+/* La conclusione in una riga: è la parte che viene letta sempre. */
+.analysis-headline {
+  margin: 0.4rem 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.analysis-block {
+  margin-bottom: var(--gap);
+}
+
+.analysis-block-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.analysis-list {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.analysis-assessment {
+  margin: 0;
+  font-weight: 600;
+}
+
+.analysis-basis {
+  margin: var(--gap) 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.analysis-history {
+  margin: var(--gap) 0;
+}
+
+.analysis-history summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Punteggio di solidità: cinque tacche invece di un numero solo. */
+.analysis-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.analysis-pip {
+  width: 0.6rem;
+  height: 0.9rem;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-inset);
+}
+
+.analysis-pip--on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Verdetti. Sono badge (già pillola): cambia solo la coppia bordo/colore. */
+.badge--verdict-buy {
+  border-color: var(--up);
+  color: var(--up);
+  background: transparent;
+  font-weight: 600;
+}
+
+.badge--verdict-hold {
+  border-color: var(--border-strong);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.badge--verdict-trim {
+  border-color: var(--warn-border);
+  background: var(--warn-surface);
+  color: var(--warn-text);
+  font-weight: 600;
+}
+
+.badge--verdict-avoid {
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+.badge--verdict-more {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-weak);
+  font-weight: 600;
+}
+
+/* Un verdetto in tabella è un link: deve restare leggibile come badge. */
+a.badge--verdict-buy,
+a.badge--verdict-hold,
+a.badge--verdict-trim,
+a.badge--verdict-avoid,
+a.badge--verdict-more {
+  text-decoration: none;
+}

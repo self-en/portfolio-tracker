@@ -127,6 +127,56 @@ export interface IncomeEvent {
   updatedAt: Timestamp;
 }
 
+// --- Analisi dello strumento con Claude -------------------------------------
+//
+// Il verdetto e la confidenza sono i due soli campi con una lista chiusa di valori
+// (CHECK in 004_instrument_analyses.sql): sono quelli su cui la UI ragiona. Tutto
+// il resto è prosa strutturata, e vive in `analysis`.
+
+export type AnalysisVerdict = "COMPRARE" | "MANTENERE" | "RIDURRE" | "EVITARE" | "APPROFONDIRE";
+export type AnalysisConfidence = "ALTA" | "MEDIA" | "BASSA";
+export type AnalysisSeverity = "ALTA" | "MEDIA" | "BASSA";
+
+/** L'output strutturato del modello. La forma è imposta da `src/ai/prompt.ts`. */
+export interface AnalysisPayload {
+  headline: string;
+  summary: string;
+  /** L'analisi di bilancio propriamente detta. `score` va da 1 (fragile) a 5 (solido). */
+  financialHealth: { score: number; label: string; notes: string[] };
+  valuation: { assessment: string; notes: string[] };
+  strengths: Array<{ title: string; detail: string }>;
+  risks: Array<{ title: string; detail: string; severity: AnalysisSeverity }>;
+  /** Cosa fare rispetto alla posizione già in portafoglio (o al primo acquisto). */
+  positionAdvice: string;
+  /** Gli indicatori da tenere d'occhio: è ciò che rende l'analisi riutilizzabile. */
+  watchlist: string[];
+  /** I dati che NON c'erano. Un'analisi che non lo dichiara non è verificabile. */
+  dataGaps: string[];
+}
+
+/** Token consumati da una singola analisi: l'unico modo di sapere quanto costa. */
+export interface AnalysisUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** Modello che ha effettivamente risposto: con un fallback può non essere quello richiesto. */
+  servedBy?: string | null;
+}
+
+export interface InstrumentAnalysis {
+  id: number;
+  instrumentId: number;
+  model: string;
+  effort: string | null;
+  verdict: AnalysisVerdict;
+  confidence: AnalysisConfidence;
+  headline: string;
+  analysis: AnalysisPayload;
+  /** Lo snapshot dei dati di ingresso, per rileggere il verdetto tra sei mesi. */
+  context: Record<string, unknown>;
+  usage: AnalysisUsage;
+  createdAt: Timestamp;
+}
+
 /**
  * Una riga così come torna da `pg`: i nomi sono snake_case e i valori arrivano
  * come stringhe (o null). È deliberatamente permissiva - la conoscenza della

@@ -11,6 +11,10 @@ const STATUS = {
   conflict: 409,
   db_unavailable: 503,
   not_configured: 503,
+  // Distinto da `not_configured`, che nella SPA significa "l'APP non è
+  // configurata" e apre la schermata di configurazione: qui l'app funziona, è la
+  // sola analisi con Claude a non essere disponibile.
+  ai_unavailable: 503,
   upstream_error: 502,
   rate_limited: 429,
   internal_error: 500,

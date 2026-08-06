@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { del, get, patch } from "../api";
-import { DASH, num } from "../format";
+import { DASH, date, num } from "../format";
+import { VERDICT_CLASS, VERDICT_LABEL } from "../components/InstrumentAnalysis";
 import DataTable from "../components/DataTable";
 import Drawer from "../components/Drawer";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -147,6 +148,26 @@ export default function Instruments() {
             <StaleBadge asOf={i.latestQuote?.asOf} stale={!i.latestQuote} />
           </span>
         ),
+      },
+      {
+        // Il verdetto dell'ultima analisi, non l'analisi: la scheda si legge nel
+        // dettaglio. Qui serve a rispondere a "quali titoli ho già valutato".
+        key: "analysis",
+        header: "Analisi",
+        render: (i) =>
+          i.latestAnalysis ? (
+            <Link
+              className={VERDICT_CLASS[i.latestAnalysis.verdict] || "badge"}
+              to={`/strumenti/${i.id}#analisi`}
+              title={`${i.latestAnalysis.headline} — ${date(i.latestAnalysis.createdAt.slice(0, 10))}`}
+            >
+              {VERDICT_LABEL[i.latestAnalysis.verdict] || i.latestAnalysis.verdict}
+            </Link>
+          ) : (
+            <Link className="muted small" to={`/strumenti/${i.id}#analisi`}>
+              analizza
+            </Link>
+          ),
       },
       {
         key: "actions",

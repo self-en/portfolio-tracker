@@ -22,11 +22,32 @@ export interface ImportApi {
   insertInstrument: (i: ImportInstrument) => Promise<number>;
   insertTransaction: (portfolioId: number, instrumentId: number | null, t: ImportTransaction) => Promise<void>;
   insertManualPrice: (instrumentId: number, date: DateString, close: DecimalString) => Promise<void>;
+  insertAnalysis: (instrumentId: number, a: ImportAnalysis) => Promise<boolean>;
+}
+
+/**
+ * Un'analisi da un dump. `createdAt` si CONSERVA: un'analisi è una fotografia
+ * datata, e reimportarla con la data di oggi la renderebbe una bugia.
+ */
+export interface ImportAnalysis {
+  createdAt?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  verdict?: string | null;
+  confidence?: string | null;
+  headline?: string | null;
+  analysis?: unknown;
+  context?: unknown;
+  usage?: unknown;
 }
 
 /** Svuota le tabelle di dati, nell'ordine che rispetta le foreign key. */
 async function wipe(client: PoolClient) {
   await client.query("DELETE FROM income_events");
+  // Prima degli strumenti anche se la foreign key è ON DELETE CASCADE: la cascata
+  // funziona, ma un wipe che elenca ciò che cancella si rilegge senza dover andare a
+  // controllare lo schema.
+  await client.query("DELETE FROM instrument_analyses");
   await client.query("DELETE FROM transactions");
   await client.query("DELETE FROM prices_daily");
   await client.query("DELETE FROM quotes_latest");
@@ -131,6 +152,59 @@ async function insertManualPrice(client: PoolClient, instrumentId: number, date:
 }
 
 /**
+ * Reinserisce un'analisi già generata.
+ *
+ * `ON CONFLICT DO NOTHING` sull'indice unico (instrument_id, created_at) rende
+ * l'import IDEMPOTENTE: reimportare due volte lo stesso backup non moltiplica le
+ * analisi. Restituisce `true` solo se ha davvero inserito, così le statistiche
+ * dell'import non mentono.
+ *
+ * Un'analisi incompleta si SALTA invece di inventarne i campi: `verdict` e
+ * `confidence` hanno un CHECK constraint, e un dump modificato a mano non deve
+ * poter far fallire l'intera transazione.
+ */
+async function insertAnalysis(
+  client: PoolClient,
+  instrumentId: number,
+  a: ImportAnalysis
+): Promise<boolean> {
+  if (!a?.verdict || !a?.confidence || !a?.model) return false;
+
+  // Il duplicato si cerca PRIMA, con una SELECT, invece di affidarsi solo a
+  // ON CONFLICT: l'inferenza del conflitto sul vincolo (instrument_id, created_at)
+  // è corretta su Postgres ma pg-mem — con cui girano i test in locale — non la
+  // applica ai timestamp, quindi l'idempotenza dell'import non sarebbe verificabile.
+  // L'ON CONFLICT resta come rete di sicurezza sul database vero.
+  if (a.createdAt) {
+    const { rows } = await client.query(
+      "SELECT 1 FROM instrument_analyses WHERE instrument_id = $1 AND created_at = $2::timestamptz LIMIT 1",
+      [instrumentId, a.createdAt]
+    );
+    if (rows.length > 0) return false;
+  }
+
+  const { rowCount } = await client.query(
+    `INSERT INTO instrument_analyses
+       (instrument_id, model, effort, verdict, confidence, headline, analysis, context, usage, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb, COALESCE($10::timestamptz, now()))
+     ON CONFLICT (instrument_id, created_at) DO NOTHING`,
+    [
+      instrumentId,
+      a.model,
+      a.effort ?? null,
+      a.verdict,
+      a.confidence,
+      a.headline || "",
+      JSON.stringify(a.analysis ?? {}),
+      JSON.stringify(a.context ?? {}),
+      JSON.stringify(a.usage ?? {}),
+      a.createdAt ?? null,
+    ]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
  * Esegue l'import in UNA transazione. `plan` è una callback che riceve i primitivi
  * e decide la mappatura: la logica di rimappatura degli id resta nella route, l'SQL
  * resta qui.
@@ -145,6 +219,7 @@ async function runImport<T>(plan: (api: ImportApi) => Promise<T>): Promise<T> {
       insertInstrument: (i) => insertInstrument(client, i),
       insertTransaction: (pid, iid, t) => insertTransaction(client, pid, iid, t),
       insertManualPrice: (iid, date, close) => insertManualPrice(client, iid, date, close),
+      insertAnalysis: (iid, a) => insertAnalysis(client, iid, a),
     })
   );
 }

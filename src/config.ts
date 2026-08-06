@@ -9,6 +9,11 @@ import logger from "./logger";
 
 const MIN_SECRET_LEN = 32;
 
+// Il modello dell'analisi. Non è una "preferenza": è il modello per cui i prompt
+// sono scritti e su cui l'output strutturato è stato provato.
+const DEFAULT_MODEL = "claude-opus-5";
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+
 function bool(v: string | undefined, dflt = false): boolean {
   if (v === undefined || v === "") return dflt;
   return v === "true" || v === "1" || v === "yes";
@@ -39,6 +44,20 @@ function build() {
   // NON auto-generiamo SESSION_SECRET: invaliderebbe in silenzio ogni sessione a
   // ogni deploy, nascondendo la misconfigurazione dietro un "ogni tanto devo
   // rifare il login". Meglio un locked mode rumoroso.
+
+  const anthropicKey = (process.env.ANTHROPIC_API_KEY || "").trim();
+
+  // Un livello di sforzo scritto male (`ANALYSIS_EFFORT=alto`) sarebbe un 400 dal
+  // provider a ogni analisi, cioè una funzione rotta a runtime per un errore di
+  // battitura nella configurazione. Si corregge qui, rumorosamente.
+  const rawEffort = (process.env.ANALYSIS_EFFORT || "").trim().toLowerCase();
+  const analysisEffort = !rawEffort || EFFORT_LEVELS.includes(rawEffort) ? rawEffort || "high" : "high";
+  if (rawEffort && !EFFORT_LEVELS.includes(rawEffort)) {
+    logger.warn(
+      { value: rawEffort, allowed: EFFORT_LEVELS },
+      "[config] ANALYSIS_EFFORT non riconosciuto: uso 'high'"
+    );
+  }
 
   const hasDiscretePg = !!process.env.PGHOST;
   const hasPgUrl = !!process.env.DATABASE_URL;
@@ -89,10 +108,29 @@ function build() {
       timezone: process.env.SCHEDULER_TZ || "Europe/Rome",
     },
 
+    // Analisi dello strumento con Claude. SENZA CHIAVE LA FUNZIONE È SPENTA, NON
+    // ROTTA: `configured: false` viaggia nella risposta, la UI disattiva il pulsante
+    // e spiega cosa impostare. Non è un motivo di locked mode — il portafoglio
+    // funziona benissimo senza analisi, e trattare una funzione opzionale come una
+    // configurazione obbligatoria bloccherebbe l'intera app per un extra.
+    ai: {
+      configured: !!anthropicKey,
+      apiKey: anthropicKey,
+      model: process.env.ANALYSIS_MODEL || DEFAULT_MODEL,
+      effort: analysisEffort,
+      // Un'analisi con thinking adattivo su un bilancio intero può durare minuti:
+      // il default del SDK (10 minuti) è troppo per una richiesta HTTP che un utente
+      // sta guardando, 3 minuti sono abbastanza perché non venga troncata.
+      timeoutMs: int(process.env.ANALYSIS_TIMEOUT_MS, 180_000),
+    },
+
     limits: {
       loginAttempts: int(process.env.LOGIN_ATTEMPTS, 10),
       loginWindowMs: int(process.env.LOGIN_WINDOW_MS, 15 * 60 * 1000),
       globalPerMinute: int(process.env.GLOBAL_RATE_LIMIT, 300),
+      // Ogni analisi è una chiamata a pagamento: il limite esiste per proteggere la
+      // bolletta da un doppio click, non da un attacco.
+      analysisPerHour: int(process.env.ANALYSIS_RATE_LIMIT, 20),
     },
   };
 
@@ -112,8 +150,13 @@ if (config.locked) {
 if (!config.db.configured) {
   logger.warn("[config] nessun database configurato (PGHOST/DATABASE_URL assenti)");
 }
+if (!config.ai.configured) {
+  logger.info(
+    "[config] ANTHROPIC_API_KEY assente: l'analisi degli strumenti con Claude resta disattivata"
+  );
+}
 
 // solo per i test
 
-export { MIN_SECRET_LEN, build as _build };
+export { MIN_SECRET_LEN, DEFAULT_MODEL, EFFORT_LEVELS, build as _build };
 export default config;

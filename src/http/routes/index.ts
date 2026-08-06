@@ -20,6 +20,7 @@ import { router as authRouter } from "./auth";
 import { router as systemRouter } from "./system";
 import { router as portfoliosRouter } from "./portfolios";
 import { router as instrumentsRouter } from "./instruments";
+import { router as analysisRouter } from "./analysis";
 import { router as transactionsRouter } from "./transactions";
 import { router as portfolioRouter } from "./portfolio";
 import { router as calendarRouter } from "./calendar";
@@ -62,6 +63,9 @@ const buildApiRouter: FastifyPluginAsync = async (api) => {
     await secured.register(systemRouter, { prefix: "/system" });
     await secured.register(portfoliosRouter, { prefix: "/portfolios" });
     await secured.register(instrumentsRouter, { prefix: "/instruments" });
+    // Stesso prefisso, file separato: l'analisi con Claude ha un contesto da
+    // assemblare che non c'entra niente con l'anagrafica degli strumenti.
+    await secured.register(analysisRouter, { prefix: "/instruments" });
     await secured.register(transactionsRouter, { prefix: "/transactions" });
     await secured.register(portfolioRouter, { prefix: "/portfolio" });
     await secured.register(calendarRouter, { prefix: "/calendar" });

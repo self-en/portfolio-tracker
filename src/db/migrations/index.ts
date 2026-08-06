@@ -18,6 +18,7 @@ const migrations: Migration[] = [
   { version: "001_init", sql: read("001_init.sql") },
   { version: "002_seed", sql: read("002_seed.sql") },
   { version: "003_standalone_fees", sql: read("003_standalone_fees.sql") },
+  { version: "004_instrument_analyses", sql: read("004_instrument_analyses.sql") },
 ];
 
 // Esportato in entrambe le forme: `default` per gli import TypeScript, nominato

@@ -121,7 +121,8 @@ tutta la matematica. `settle_date` è informativa.
 | `src/domain/`  | **solo `decimal.js`**               | `pg`, `logger`, `Date.now()` — il tempo è parametro  |
 | `src/repo/`    | `pg`, `domain/`                     | provider di mercato, fastify                        |
 | `src/market/`  | provider, `repo/`, `logger`         | **mai `domain/`**                                   |
-| `src/http/`    | `repo/`, `domain/`, `market/`       | SQL inline                                          |
+| `src/ai/`      | `config`, `logger`, SDK Anthropic   | `pg`, `db/`, `repo/`, fastify — vedi §12            |
+| `src/http/`    | `repo/`, `domain/`, `market/`, `ai/` | SQL inline                                         |
 
 `domain/` è puro e senza I/O: è la superficie di unit test, ed è ciò che rende la
 matematica verificabile senza Postgres (che in locale non c'è).
@@ -212,3 +213,56 @@ Dettagli reali della risposta Yahoo, catturati e non indovinati:
   UTC della data è la `price_date` corretta per i mercati europei e americani.
 - `require("yahoo-finance2").default` costruisce senza problemi su node 24 e
   accetta l'adapter pino: **nessuna migrazione ESM necessaria**.
+
+## 12. Analisi degli strumenti con Claude
+
+La funzione produce **prosa**, non numeri: il modello non calcola né scrive prezzi,
+quantità, valorizzazioni o rendimenti. Tutti i numeri che vede sono già stati
+calcolati da `domain/` e serializzati come nel resto dell'API. È il confine che
+tiene la matematica finanziaria — il 70% del rischio — fuori dalla portata di un
+generatore di testo.
+
+- **Senza `ANTHROPIC_API_KEY` la funzione è spenta, non rotta.** Non è un motivo di
+  locked mode: il portafoglio funziona benissimo senza analisi. `GET` risponde 200 con
+  `configured: false`, `POST` risponde **`ai_unavailable`** (503) — codice distinto da
+  `not_configured`, che nella SPA significa "l'app non è configurata" e aprirebbe la
+  schermata di configurazione mandando l'utente a impostare `APP_PASSWORD`.
+- **Nessuna generazione automatica.** Ogni analisi è una chiamata a pagamento: parte
+  solo da un click, con rate limit (`ANALYSIS_RATE_LIMIT`, default 20/ora) che difende
+  la bolletta, non dal brute force. Nessuno scheduler la accoda, mai.
+- **Un'analisi è una FOTOGRAFIA datata, quindi si persiste e non si sovrascrive.**
+  `instrument_analyses` è append-only e conserva lo `context` completo — lo snapshot
+  dei dati di ingresso. Rigenerarla domani non la riproduce: dà un'altra analisi. Per
+  questo entra nell'export (a differenza di quotazioni e cambi, che si riscaricano) e
+  il reimport è idempotente sulla chiave `(instrument_id, created_at)`.
+- **Terza eccezione alla regola sui provider.** Gli handler HTTP non chiamano
+  provider in modo sincrono; `POST /instruments/:id/analysis` si aggiunge a
+  `/market/search` e `/market/refresh` perché i fondamentali servono *adesso* per
+  costruire il prompt.
+- **Output strutturato + doppia guardia.** Lo schema JSON (`output_config.format`)
+  vincola il modello; zod rivalida in casa; il `CHECK` constraint è l'ultima rete.
+  Verdetto e confidenza sono liste chiuse dichiarate in tre posti che devono restare
+  allineati: `src/ai/prompt.ts`, `004_instrument_analyses.sql`, `web/src/types.ts`.
+- **Il prompt di sistema è il prefisso in cache: non contiene dati dello strumento.**
+  I dati vivono nel turno utente. Il blocco specifico per classe di attivo si
+  **appende** al prefisso comune, così le classi sono cinque prefissi memorizzabili
+  invece di uno inutilizzabile. Interpolare il nome di un titolo nel prompt di sistema
+  invaliderebbe la cache a ogni analisi, in silenzio e a pagamento.
+- **Un dato che manca si dichiara.** `contextGaps()` calcola le lacune *sul contesto*,
+  lato server, e la pagina le mostra accanto a quelle autodichiarate dal modello. È la
+  stessa regola dei prezzi mancanti (§5): un provider senza fondamentali su un BTP è
+  il caso NORMALE, e un'analisi che non dice su cosa non ha potuto lavorare non è
+  verificabile. Nello stesso spirito, uno zero del provider dove il dato non esiste
+  (`grossProfit: 0` su 416 miliardi di ricavi) viene normalizzato a `null`: un numero
+  sbagliato è molto peggio di un numero assente.
+- **`src/ai/` è un modulo di confine, come `src/market/`.** Riceve un contesto già
+  assemblato e restituisce un risultato validato: non conosce `pg`, `repo/`, `db/` né
+  fastify, e solleva errori con un `code` che il layer HTTP traduce. È ciò che rende
+  l'intero percorso provabile con un client finto (`_setClient`), senza spendere un
+  euro a ogni `npm test`.
+- **`domain/riskMetrics.ts` calcola volatilità, drawdown e distanze dai massimi sui
+  NOSTRI prezzi**, non li chiede al provider: così esistono anche dove la copertura è
+  zero (i BTP) e sono verificabili con un unit test. La data di riferimento è un
+  parametro, come per tutto `domain/`.
+- **Non è consulenza finanziaria**, e il disclaimer viaggia nella risposta dell'API —
+  non solo nella pagina — così ogni client lo mostra.
