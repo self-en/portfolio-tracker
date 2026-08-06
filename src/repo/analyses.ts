@@ -82,10 +82,16 @@ async function byId(id: number): Promise<InstrumentAnalysis | null> {
  * L'ultima analisi per ciascuno degli strumenti indicati: è quello che serve alla
  * LISTA degli strumenti, che altrimenti farebbe una query per riga.
  *
+ * Si raggruppa su `MAX(created_at)`, NON su `MAX(id)`. La differenza non è
+ * accademica: l'import CONSERVA il `created_at` originale (un'analisi è una
+ * fotografia datata), e l'export le emette dalla più recente — quindi dopo un
+ * reimport la più recente ha l'id più BASSO, e `MAX(id)` avrebbe mostrato in lista
+ * un verdetto diverso da quello del dettaglio. Bug trovato in review, non in
+ * produzione: qui c'è il test che lo blocca.
+ *
  * Nessuna window function (`DISTINCT ON`, `ROW_NUMBER() OVER`): pg-mem non le
  * implementa, e la lista degli strumenti di un portafoglio personale sta in poche
- * decine di righe — il raggruppamento sull'id massimo costa niente e gira su
- * entrambi. `id` è SERIAL, quindi il massimo id è anche la più recente.
+ * decine di righe. Due query invece di una, entrambe portabili.
  */
 async function latestForMany(
   instrumentIds: readonly number[]
@@ -94,18 +100,24 @@ async function latestForMany(
   if (!instrumentIds || instrumentIds.length === 0) return out;
 
   const params: unknown[] = [];
-  const { rows: ids } = await query(
-    `SELECT MAX(id)::int AS id FROM instrument_analyses
+  const { rows: latestByInstrument } = await query(
+    `SELECT instrument_id, MAX(created_at) AS created_at FROM instrument_analyses
       WHERE instrument_id ${inList(params, instrumentIds)}
       GROUP BY instrument_id`,
     params
   );
-  const wanted = ids.map((x) => Number(x.id)).filter((n) => Number.isFinite(n));
-  if (wanted.length === 0) return out;
+  if (latestByInstrument.length === 0) return out;
 
+  // Coppie (strumento, istante): il vincolo unico su quelle due colonne garantisce
+  // una riga per coppia. Forma espansa e non `(a,b) IN ((…),(…))` per lo stesso
+  // motivo di `inList`: la portabilità verso pg-mem (vedi repo/sqlUtil.ts).
   const params2: unknown[] = [];
+  const conditions = latestByInstrument.map((x) => {
+    params2.push(Number(x.instrument_id), x.created_at);
+    return `(instrument_id = $${params2.length - 1} AND created_at = $${params2.length})`;
+  });
   const { rows: r } = await query(
-    `SELECT ${COLS} FROM instrument_analyses WHERE id ${inList(params2, wanted)}`,
+    `SELECT ${COLS} FROM instrument_analyses WHERE ${conditions.join(" OR ")}`,
     params2
   );
   for (const a of rows.mapAll(r, rows.instrumentAnalysis)) out.set(a.instrumentId, a);

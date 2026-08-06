@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 
 import { newDb, DataType } from "pg-mem";
 import { migrate, knownVersions } from "../../src/db/migrate";
+import { registerMissingBuiltins } from "../helpers/memdb";
 
 function makeDb() {
   // noAstCoverageCheck: l'adapter `pg` di pg-mem esegue un controllo di copertura
@@ -32,6 +33,10 @@ function makeDb() {
     returns: db.public.getType(DataType.bool),
     implementation: () => true,
   });
+  // I builtin che pg-mem non ha e che il DDL usa (`date_trunc` nella 004): l'harness
+  // qui costruisce il suo database con opzioni diverse, ma le funzioni sono le stesse
+  // di test/helpers/memdb.ts e vanno tenute in un posto solo.
+  registerMissingBuiltins(db);
   const { Pool } = db.adapters.createPg();
   return { db, pool: new Pool() };
 }

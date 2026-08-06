@@ -18,6 +18,7 @@ import logger from "../../logger";
 import config from "../../config";
 import * as instrumentsRepo from "../../repo/instruments";
 import * as portfoliosRepo from "../../repo/portfolios";
+import * as txRepo from "../../repo/transactions";
 import * as pricesRepo from "../../repo/prices";
 import * as analysesRepo from "../../repo/analyses";
 import * as bonds from "../../domain/bonds";
@@ -148,19 +149,32 @@ async function buildContext(inst: Instrument): Promise<AnalysisContext & { gaps:
   // database e non dalla forma del contesto.
   const extraGaps: string[] = [];
   try {
-    const valuation = await loadValuation({ asOf: at });
+    // QUALE portafoglio: `loadValuation()` senza id cade sul primo, e su un titolo
+    // detenuto nel secondo produrrebbe `position: null` — cioè direbbe al modello
+    // "non lo possiedi" mentre lo possiedi, e calcolerebbe il peso su un totale che
+    // non è quello giusto. Un dato FALSO in una chiamata a pagamento, non un dato
+    // mancante.
+    //
+    // Si parte dal ledger (una query, nessuna valorizzazione) per sapere dove il
+    // titolo è movimentato, e si valorizza SOLO quel portafoglio: valorizzarli tutti
+    // significherebbe ricaricare prezzi e cambi per ognuno.
+    const portfolios = await portfoliosRepo.list();
+    const holders = [
+      ...new Set((await txRepo.ledger({ instrumentId: inst.id, asOf: at })).map((t) => t.portfolioId)),
+    ];
+    const chosen = portfolios.find((p) => p && holders.includes(p.id)) ?? portfolios[0];
+
+    const valuation = await loadValuation({ portfolioId: chosen?.id, asOf: at });
     portfolio = { id: valuation.portfolio.id, name: valuation.portfolio.name };
     portfolioValue = S.m(valuation.valued.totals.totalValue);
     const row = valuation.valued.rows.find((r: any) => Number(r.instrumentId ?? r.instrument?.id) === inst.id);
     if (row) position = S.position(row) as unknown as Record<string, unknown>;
 
-    // `loadValuation` senza portfolioId lavora sul PRIMO portafoglio: con più
-    // portafogli la posizione considerata è solo quella, e va detto invece di
-    // lasciar credere al modello (e all'utente) che sia il totale.
-    const portfolios = await portfoliosRepo.list();
-    if (portfolios.length > 1) {
+    // Se il titolo è movimentato in più portafogli, l'analisi ne vede uno solo: va
+    // detto, altrimenti il peso sembra quello complessivo.
+    if (holders.length > 1) {
       extraGaps.push(
-        `posizione e peso considerati solo per il portafoglio "${portfolio.name}": ce ne sono ${portfolios.length}`
+        `il titolo è movimentato in ${holders.length} portafogli: posizione e peso sono quelli di "${portfolio.name}"`
       );
     }
   } catch (e) {
@@ -261,15 +275,18 @@ const router: FastifyPluginAsync = async (app) => {
     {
       preHandler: [
         params(z.object({ id: idParam() })),
-        query(z.object({ history: z.coerce.number().int().min(0).max(50).optional() })),
+        // min(1): `history=0` non significa niente — l'ultima analisi c'è sempre — e
+        // un 422 esplicito è meglio di un silenzioso "in realtà te ne dò una".
+        query(z.object({ history: z.coerce.number().int().min(1).max(50).optional() })),
       ],
     },
     async (req, reply) => {
       const inst = await instrumentsRepo.byId(req.valid.params.id);
       if (!inst) throw notFound("strumento non trovato");
 
-      const limit = req.valid.query.history ?? 5;
-      const list = await analysesRepo.history(inst.id, Math.max(limit, 1));
+      // `history` conta le voci TOTALI: `previous` ne avrà una in meno, perché la
+      // prima è `latest`.
+      const list = await analysesRepo.history(inst.id, req.valid.query.history ?? 5);
 
       return reply.send({
         instrumentId: inst.id,
@@ -286,7 +303,7 @@ const router: FastifyPluginAsync = async (app) => {
 
   app.post(
     "/:id/analysis",
-    { preHandler: [analysisLimiter.hook, params(z.object({ id: idParam() }))] },
+    { preHandler: [params(z.object({ id: idParam() }))] },
     async (req, reply) => {
       const inst = await instrumentsRepo.byId(req.valid.params.id);
       if (!inst) throw notFound("strumento non trovato");
@@ -296,6 +313,24 @@ const router: FastifyPluginAsync = async (app) => {
       if (!isConfigured()) {
         throw err("ai_unavailable", "l'analisi con Claude non è configurata", {
           hint: "imposta ANTHROPIC_API_KEY dalla pagina Configurazione del progetto",
+        });
+      }
+
+      // Il limite si consuma QUI e non in un preHandler: un id inesistente (404),
+      // un id malformato (422) o la chiave mancante (503) non costano niente, e
+      // bruciare per loro una delle 20 analisi/ora punirebbe l'utente per un errore
+      // che non gli è costato un centesimo. `hit()` conta e decide, l'hook no.
+      const limit = analysisLimiter.hit(req.ip || "unknown");
+      if (!limit.allowed) {
+        logger.warn(
+          { instrumentId: inst.id, count: limit.count, max: config.limits.analysisPerHour },
+          "[analysis] limite oraria raggiunto"
+        );
+        void reply.header("Retry-After", String(limit.retryAfterSec));
+        throw err("rate_limited", "troppe analisi in poco tempo, riprova più tardi", {
+          retryAfterSec: limit.retryAfterSec,
+          max: config.limits.analysisPerHour,
+          hint: "ogni analisi è una chiamata a pagamento: il limite protegge la spesa",
         });
       }
 
@@ -318,20 +353,41 @@ const router: FastifyPluginAsync = async (app) => {
         rethrow(e);
       }
 
-      const saved = await analysesRepo.create({
-        instrumentId: inst.id,
-        model: result.model,
-        effort: result.effort,
-        verdict: result.verdict,
-        confidence: result.confidence,
-        headline: result.headline,
-        analysis: result.analysis,
-        // Lo snapshot completo, lacune comprese: è ciò che rende il verdetto
-        // rileggibile quando i prezzi e il bilancio saranno cambiati. Il cast è
-        // dovuto: `context` è una forma dichiarata, la colonna è un JSONB generico.
-        context: context as unknown as Record<string, unknown>,
-        usage: result.usage,
-      });
+      let saved;
+      try {
+        saved = await analysesRepo.create({
+          instrumentId: inst.id,
+          model: result.model,
+          effort: result.effort,
+          verdict: result.verdict,
+          confidence: result.confidence,
+          headline: result.headline,
+          analysis: result.analysis,
+          // Lo snapshot completo, lacune comprese: è ciò che rende il verdetto
+          // rileggibile quando i prezzi e il bilancio saranno cambiati. Il cast è
+          // dovuto: `context` è una forma dichiarata, la colonna è un JSONB generico.
+          context: context as unknown as Record<string, unknown>,
+          usage: result.usage,
+        });
+      } catch (e) {
+        // L'analisi è GIÀ STATA PAGATA e a questo punto esiste solo in memoria: se
+        // il salvataggio non riesce (pool caduto, vincolo violato) l'unico modo di
+        // non buttarla è metterla nei log. Verboso di proposito — è il contenuto
+        // completo, non un riassunto.
+        logger.error(
+          {
+            instrumentId: inst.id,
+            err: errMessage(e),
+            verdict: result.verdict,
+            confidence: result.confidence,
+            headline: result.headline,
+            analysis: result.analysis,
+            usage: result.usage,
+          },
+          "[analysis] analisi generata e PAGATA ma NON salvata: il contenuto è in questo record"
+        );
+        throw e;
+      }
       if (!saved) throw err("internal_error", "analisi generata ma non salvata");
 
       // 201: la risorsa è stata creata. La UI la mostra subito, non c'è nulla da
@@ -345,4 +401,4 @@ const router: FastifyPluginAsync = async (app) => {
   );
 };
 
-export { router, buildContext, serialize as _serialize, RISK_YEARS };
+export { router, buildContext, serialize as _serialize, RISK_YEARS, analysisLimiter as _analysisLimiter };

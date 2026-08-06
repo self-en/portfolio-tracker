@@ -162,6 +162,7 @@ test("contextGaps segnala lo storico troppo corto per volatilità e drawdown", (
       to: "2026-08-05",
       last: "12.5",
       spanDays: 4,
+      granularity: "daily",
       high52w: null,
       low52w: null,
       fromHigh52w: null,
@@ -175,6 +176,35 @@ test("contextGaps segnala lo storico troppo corto per volatilità e drawdown", (
     },
   });
   assert.ok(prompt.contextGaps(ctx).some((g) => g.includes("troppo corto")));
+});
+
+test("contextGaps dichiara la serie NON giornaliera (il caso del bond a prezzo manuale)", () => {
+  // Su una serie sparsa volatilità e medie mobili non sono calcolabili: la lacuna
+  // deve dirlo, altrimenti il modello legge dei `null` senza sapere perché.
+  const ctx = context({
+    priceCoverage: { from: "2024-02-15", to: "2026-06-15", rows: 25 },
+    risk: {
+      points: 25,
+      from: "2024-02-15",
+      to: "2026-06-15",
+      last: "101.25",
+      spanDays: 851,
+      granularity: "sparse",
+      high52w: null,
+      low52w: null,
+      fromHigh52w: null,
+      fromLow52w: null,
+      returns: [],
+      volatility: null,
+      maxDrawdown: null,
+      sma50: null,
+      sma200: null,
+      trend: null,
+    },
+  });
+  const gaps = prompt.contextGaps(ctx);
+  assert.ok(gaps.some((g) => g.includes("non giornaliera") && g.includes("25 osservazioni")));
+  assert.ok(!gaps.some((g) => g.includes("troppo corto")), "la causa è il passo, non la lunghezza");
 });
 
 // ---------------------------------------------------------------------------

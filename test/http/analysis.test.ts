@@ -42,14 +42,20 @@ const ANALYSIS = {
   dataGaps: ["stato patrimoniale voce per voce non pubblicato"],
 };
 
-/** Un client finto che risponde come l'API: blocchi `text` con il JSON dentro. */
+/**
+ * Un client finto che risponde come l'API: blocchi `text` con il JSON dentro.
+ *
+ * Espone `stream()` perché è così che il modulo chiama il modello — in streaming, per
+ * non incappare nel timeout HTTP quando `max_tokens` è alto — e il messaggio completo
+ * si ottiene da `finalMessage()`.
+ */
 function fakeClient(reply: (params: any) => unknown) {
   return {
     beta: {
       messages: {
-        create: async (params: any) => {
+        stream: (params: any) => {
           captured = params;
-          return reply(params);
+          return { finalMessage: async () => reply(params) };
         },
       },
     },
@@ -378,6 +384,70 @@ test("i fondamentali del provider finiscono nel contesto e nelle basi dell'anali
   }
 });
 
+test("la posizione viene cercata nel portafoglio che DETIENE il titolo, non nel primo", async () => {
+  // Con più portafogli, `loadValuation()` senza id cade sul primo: un titolo
+  // comprato nel secondo produrrebbe "non lo possiedi" e un peso calcolato sul
+  // totale sbagliato — un dato falso dato in pasto a una chiamata a pagamento.
+  let r = await api("/api/portfolios", { method: "POST", body: JSON.stringify({ name: "Secondario" }) });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const secondo = r.body.id;
+
+  r = await api("/api/instruments", {
+    method: "POST",
+    body: JSON.stringify({ assetClass: "ETF", name: "Solo nel secondo", ticker: "SEC.MI", currency: "EUR" }),
+  });
+  assert.equal(r.status, 201);
+  const soloNelSecondo = r.body.id;
+
+  r = await api("/api/transactions", {
+    method: "POST",
+    body: JSON.stringify({
+      portfolioId: secondo,
+      instrumentId: soloNelSecondo,
+      type: "BUY",
+      tradeDate: "2025-05-05",
+      quantity: "10",
+      price: "50",
+    }),
+  });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+
+  aiClient._setClient(fakeClient(okReply()));
+  captured = null;
+  const created = await api(`/api/instruments/${soloNelSecondo}/analysis`, { method: "POST" });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+
+  const p = must(captured, "i parametri catturati");
+  const json = JSON.parse(p.messages[0].content.slice(p.messages[0].content.indexOf("{")));
+  assert.equal(json.portfolio.name, "Secondario", "il portafoglio che detiene il titolo");
+  assert.ok(json.position, "la posizione deve esserci");
+  assert.equal(String(json.position.quantity).startsWith("10"), true);
+  assert.equal(created.body.analysis.basis.hadPosition, true);
+});
+
+test("il tetto dei token sale con lo sforzo: a xhigh/max 16k non basta al solo pensiero", async () => {
+  const { maxTokensFor } = require("../../src/ai/instrumentAnalysis") as typeof import("../../src/ai/instrumentAnalysis");
+  assert.equal(maxTokensFor("low"), 16_000);
+  assert.equal(maxTokensFor("high"), 16_000);
+  assert.equal(maxTokensFor("xhigh"), 64_000);
+  assert.equal(maxTokensFor("max"), 64_000);
+
+  // E la richiesta lo usa davvero: a `max` il tetto dev'essere quello alto,
+  // altrimenti la scheda torna troncata (502) dopo aver pagato.
+  const before = config.ai.effort;
+  config.ai.effort = "max";
+  try {
+    aiClient._setClient(fakeClient(okReply()));
+    captured = null;
+    const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(must(captured, "i parametri").max_tokens, 64_000);
+    assert.equal(must(captured, "i parametri").output_config.effort, "max");
+  } finally {
+    config.ai.effort = before;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Errori del modello: mai un 500, mai una scheda a metà
 // ---------------------------------------------------------------------------
@@ -520,20 +590,40 @@ test("l'export contiene le analisi, e il reimport è IDEMPOTENTE", async () => {
   );
 });
 
-test("un'analisi senza verdetto viene SALTATA invece di far fallire l'import", async () => {
-  const r = await api("/api/import", {
-    method: "POST",
-    body: JSON.stringify({
-      analyses: [
-        {
-          instrumentIsin: "IT0001234567",
-          items: [{ createdAt: "2023-01-01T00:00:00.000Z", model: "x", headline: "rotta" }],
-        },
-      ],
-    }),
-  });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.imported.analyses, 0);
+test("un'analisi non valida viene SALTATA invece di far fallire l'intero import", async () => {
+  // Non basta il campo assente: un `verdict` fuori lista o una data non parsabile
+  // farebbero abortire la transazione, portandosi via portafogli, movimenti e prezzi
+  // già inseriti nello stesso import. Ogni caso qui deve tornare 200 con 0 analisi.
+  const rotte = [
+    { caso: "verdetto assente", item: { createdAt: "2023-01-01T00:00:00.000Z", model: "x", headline: "rotta" } },
+    {
+      caso: "verdetto fuori lista (violerebbe il CHECK)",
+      item: { createdAt: "2023-01-02T00:00:00.000Z", model: "x", verdict: "BUY", confidence: "ALTA" },
+    },
+    {
+      caso: "confidenza fuori lista",
+      item: { createdAt: "2023-01-03T00:00:00.000Z", model: "x", verdict: "COMPRARE", confidence: "ALTISSIMA" },
+    },
+    {
+      caso: "data non parsabile",
+      item: { createdAt: "ieri", model: "x", verdict: "COMPRARE", confidence: "ALTA" },
+    },
+  ];
+
+  for (const { caso, item } of rotte) {
+    const r = await api("/api/import", {
+      method: "POST",
+      body: JSON.stringify({
+        // Un portafoglio nello stesso dump: se la transazione abortisse, si
+        // perderebbe anche lui — ed è esattamente il danno da evitare.
+        portfolios: [{ name: `Prova ${caso}` }],
+        analyses: [{ instrumentIsin: "IT0001234567", items: [item] }],
+      }),
+    });
+    assert.equal(r.status, 200, `${caso}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.imported.analyses, 0, caso);
+    assert.equal(r.body.imported.portfolios, 1, `${caso}: il resto dell'import è passato`);
+  }
 });
 
 // ---------------------------------------------------------------------------

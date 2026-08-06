@@ -314,7 +314,7 @@ risponde alla domanda "ci investo?":
 | bilancio e conto economico | `quoteSummary` (`financialData`, `defaultKeyStatistics`, `earnings`) | indebitamento, liquidità, flussi di cassa, margini, ROE/ROA e il **trend** su quattro esercizi |
 | profilo | `assetProfile` | settore, industria, paese, attività: il contesto qualitativo |
 | costi e composizione (ETF/fondi) | `fundProfile`, `topHoldings` | su un ETF non c'è un bilancio: contano TER, dimensione e concentrazione |
-| prezzo e rischio | **i nostri prezzi**, `src/domain/riskMetrics.ts` | volatilità, max drawdown, distanza dai massimi a 52 settimane, medie mobili — calcolati in casa, quindi disponibili anche dove la copertura del provider è zero |
+| prezzo e rischio | **i nostri prezzi**, `src/domain/riskMetrics.ts` | volatilità, max drawdown, distanza dai massimi a 52 settimane, medie mobili — calcolati in casa, quindi disponibili anche dove la copertura del provider è zero. Volatilità e medie mobili **solo su una serie giornaliera**: su un bond a prezzo manuale (una rilevazione al mese) `√252` e "SMA 50 giorni" sarebbero etichette false, e al loro posto compare una lacuna dichiarata |
 | scadenzario | `src/domain/bonds.ts` | per un'obbligazione il "bilancio" è la sequenza di cedole |
 | la tua posizione | `GET /portfolio/positions` (stesso percorso) | quantità, costo medio, latente, peso: sposta la domanda da "è una buona azienda" a "devo comprarne ancora" |
 

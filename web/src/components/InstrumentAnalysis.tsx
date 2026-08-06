@@ -97,14 +97,24 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
   const basis = analysis.basis;
   // Le lacune del server (obiettive) e quelle dichiarate dal modello si mostrano
   // insieme, senza ripetizioni: dicono la stessa cosa da due punti di vista.
-  const gaps = [...new Set([...(basis?.gaps ?? []), ...(a.dataGaps ?? [])])];
+  //
+  // `Array.isArray` e non `?? []`: `analysis` e `context` sono JSONB e possono
+  // arrivare da un dump importato senza nessuna validazione di forma (l'import
+  // valida verdetto, confidenza e data — non il payload). Uno spread su un
+  // non-array lancerebbe in render.
+  const gaps = [
+    ...new Set([
+      ...(Array.isArray(basis?.gaps) ? basis.gaps : []),
+      ...(Array.isArray(a?.dataGaps) ? a.dataGaps : []),
+    ]),
+  ];
 
   return (
     <>
       <div className="analysis-head">
         <span className={VERDICT_CLASS[analysis.verdict] || "badge"}>{VERDICT_LABEL[analysis.verdict] || analysis.verdict}</span>
         <span className="badge" title="Quanto il modello si fida dei dati che ha visto">
-          confidenza {analysis.confidence.toLowerCase()}
+          confidenza {String(analysis.confidence ?? "").toLowerCase()}
         </span>
         <span className="muted small">{dateTime(analysis.createdAt)}</span>
       </div>
@@ -119,7 +129,7 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
             <span>{a.financialHealth?.label}</span>
           </div>
           <ul className="analysis-list">
-            {(a.financialHealth?.notes ?? []).map((n, i) => (
+            {(Array.isArray(a.financialHealth?.notes) ? a.financialHealth.notes : []).map((n, i) => (
               <li key={i}>{n}</li>
             ))}
           </ul>
@@ -130,7 +140,7 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
             {VALUATION_LABEL[a.valuation?.assessment] || a.valuation?.assessment || DASH}
           </p>
           <ul className="analysis-list">
-            {(a.valuation?.notes ?? []).map((n, i) => (
+            {(Array.isArray(a.valuation?.notes) ? a.valuation.notes : []).map((n, i) => (
               <li key={i}>{n}</li>
             ))}
           </ul>
@@ -139,7 +149,7 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
 
       <div className="grid grid--2">
         <Section title="Punti di forza">
-          {a.strengths?.length ? (
+          {Array.isArray(a.strengths) && a.strengths.length ? (
             <ul className="analysis-list">
               {a.strengths.map((s, i) => (
                 <li key={i}>
@@ -153,11 +163,13 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
         </Section>
 
         <Section title="Rischi">
-          {a.risks?.length ? (
+          {Array.isArray(a.risks) && a.risks.length ? (
             <ul className="analysis-list">
               {a.risks.map((r, i) => (
                 <li key={i}>
-                  <span className={SEVERITY_CLASS[r.severity] || "badge"}>{r.severity.toLowerCase()}</span>{" "}
+                  <span className={SEVERITY_CLASS[r.severity] || "badge"}>
+                    {String(r.severity ?? "").toLowerCase()}
+                  </span>{" "}
                   <strong>{r.title}.</strong> {r.detail}
                 </li>
               ))}
@@ -180,7 +192,7 @@ function AnalysisBody({ analysis, instrument }: { analysis: Analysis; instrument
         </Section>
       ) : null}
 
-      {a.watchlist?.length ? (
+      {Array.isArray(a.watchlist) && a.watchlist.length ? (
         <Section title="Da monitorare">
           <ul className="analysis-list">
             {a.watchlist.map((w, i) => (
@@ -239,8 +251,14 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
   const run = useMutation<AnalysisCreatedResponse, ApiError>({
     mutationFn: () => post<AnalysisCreatedResponse>(`/instruments/${id}/analysis`),
     onSuccess: (created) => {
-      // Si scrive direttamente la cache invece di invalidare: la risposta della POST
-      // È l'analisi, e un refetch la ripagherebbe in attesa senza aggiungere niente.
+      // Si scrive direttamente la cache: la risposta della POST È l'analisi, e un
+      // refetch farebbe aspettare per riottenere ciò che si ha già in mano.
+      //
+      // `prev` può essere `undefined`: un'analisi dura minuti, e se nel frattempo la
+      // pagina è stata lasciata la query può essere stata raccolta dal garbage
+      // collector di react-query. In quel caso l'updater NON deve restituire `prev`
+      // (sarebbe un no-op silenzioso, con la scheda appena pagata che non compare):
+      // si lascia decidere all'invalidate qui sotto, che rilegge dal server.
       queryClient.setQueryData<AnalysisResponse>(queryKey, (prev) =>
         prev
           ? {
@@ -260,8 +278,11 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
                   ]
                 : prev.previous,
             }
-          : prev
+          : undefined
       );
+      // Rete di sicurezza: se la cache era vuota (vedi sopra) questo la ricostruisce,
+      // e in ogni caso riallinea `previous` al limite che applica il server.
+      queryClient.invalidateQueries({ queryKey });
       // La lista degli strumenti mostra il verdetto: va rinfrescata.
       queryClient.invalidateQueries({ queryKey: ["instruments", "list"] });
       toast.success(`Analisi completata in ${Math.round(created.durationMs / 1000)} secondi.`);

@@ -40,6 +40,15 @@ export interface RiskMetrics {
   last: DecimalString | null;
   /** Giorni di calendario coperti dalla serie: dice se le altre metriche hanno senso. */
   spanDays: number;
+  /**
+   * `"daily"` se le osservazioni sono ravvicinate (mediana dei divari ≤ 4 giorni),
+   * `"sparse"` altrimenti — il caso di un bond a prezzo inserito a mano.
+   *
+   * Su una serie sparsa volatilità, medie mobili e trend NON vengono calcolati: le
+   * loro definizioni presuppongono il passo giornaliero, e presentarli comunque
+   * darebbe numeri sbagliati con un'etichetta rassicurante.
+   */
+  granularity: "daily" | "sparse" | null;
   high52w: { date: DateString; close: DecimalString } | null;
   low52w: { date: DateString; close: DecimalString } | null;
   /** Distanza dal massimo a 52 settimane, frazione NEGATIVA o zero. */
@@ -47,7 +56,12 @@ export interface RiskMetrics {
   /** Distanza dal minimo a 52 settimane, frazione positiva o zero. */
   fromLow52w: DecimalString | null;
   returns: HorizonReturn[];
-  /** Deviazione standard dei rendimenti giornalieri annualizzata (√252). */
+  /**
+   * Deviazione standard dei rendimenti giornalieri annualizzata (√252).
+   *
+   * `null` se la serie è `sparse` o se i rendimenti giornalieri utilizzabili sono
+   * meno di 20: √252 vale solo su un passo giornaliero.
+   */
   volatility: DecimalString | null;
   maxDrawdown: {
     /** Frazione NEGATIVA: −0,32 = −32% dal massimo precedente. */
@@ -70,6 +84,10 @@ const TRADING_DAYS = 252;
  * rendimento apparterrebbe a un periodo diverso da quello dichiarato.
  */
 const MAX_BASE_GAP_DAYS = 15;
+/** Mediana dei divari oltre la quale la serie non è più "giornaliera". */
+const MAX_DAILY_GAP_DAYS = 4;
+/** Divario oltre il quale due osservazioni non fanno un rendimento giornaliero. */
+const MAX_RETURN_GAP_DAYS = 7;
 const HORIZONS: Array<[string, number]> = [
   ["1m", 1],
   ["3m", 3],
@@ -130,13 +148,20 @@ function sma(
  * l'orologio è ciò che rende il modulo deterministico.
  */
 function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskMetrics {
-  const points = usable(series);
+  // Si taglia SOPRA `asOfDate` una volta sola, all'ingresso: senza, `last`, le medie
+  // mobili e il drawdown userebbero l'ultimo punto della serie qualunque sia la data
+  // di riferimento — e il modulo si presenta come deterministico rispetto a
+  // `asOfDate`. Dalla route non capita (la query taglia già), ma capiterebbe il
+  // giorno in cui si chiede una data storica o si inserisce a mano un prezzo con
+  // data futura.
+  const points = usable(series).filter((p) => cmp(p.date, asOfDate) <= 0);
   const empty: RiskMetrics = {
     points: 0,
     from: null,
     to: null,
     last: null,
     spanDays: 0,
+    granularity: null,
     high52w: null,
     low52w: null,
     fromHigh52w: null,
@@ -191,6 +216,24 @@ function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskM
     });
   }
 
+  // Granularità della serie. NON è un dettaglio decorativo: √252 annualizza
+  // rendimenti GIORNALIERI, e su un BTP a pricing manuale — dove il prezzo si
+  // inserisce una volta al mese, che per le obbligazioni è la strada normale
+  // (docs/decisions.md §9) — ogni "rendimento giornaliero" è in realtà mensile.
+  // Annualizzarlo con √252 invece di √12 sovrastima la volatilità di ~4,6 volte, e
+  // quel numero finirebbe in un prompt che lo dichiara "annualizzato".
+  //
+  // Mediana e non media dei divari: un solo buco lungo (una borsa chiusa una
+  // settimana, un backfill parziale) non deve declassare una serie giornaliera.
+  const gaps = [];
+  for (let i = 1; i < points.length; i++) gaps.push(daysBetween(points[i - 1].date, points[i].date));
+  const sortedGaps = gaps.slice().sort((a, b) => a - b);
+  const medianGap = sortedGaps.length === 0 ? null : sortedGaps[Math.floor(sortedGaps.length / 2)];
+  // 4 giorni di mediana coprono i fine settimana e i festivi; oltre, la serie non è
+  // giornaliera e le metriche che presuppongono il passo giornaliero si omettono.
+  const granularity: RiskMetrics["granularity"] =
+    medianGap === null ? null : medianGap <= MAX_DAILY_GAP_DAYS ? "daily" : "sparse";
+
   // Volatilità: deviazione standard CAMPIONARIA (n−1) dei rendimenti semplici
   // giornalieri, annualizzata con √252. Rendimenti semplici e non logaritmici:
   // sono quelli che il resto dell'app usa, e sulla scala di un giorno la differenza
@@ -198,10 +241,13 @@ function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskM
   let volatility: DecimalString | null = null;
   const daily = [];
   for (let i = 1; i < points.length; i++) {
+    // Un divario oltre una settimana non è un rendimento giornaliero: si salta
+    // invece di infilarlo nella stessa deviazione standard degli altri.
+    if (daysBetween(points[i - 1].date, points[i].date) > MAX_RETURN_GAP_DAYS) continue;
     const r = safeDiv(d(points[i].close).minus(d(points[i - 1].close)), d(points[i - 1].close));
     if (r !== null) daily.push(r);
   }
-  if (daily.length >= 20) {
+  if (granularity === "daily" && daily.length >= 20) {
     let sum = d(0);
     for (const r of daily) sum = sum.plus(r);
     const mean = sum.div(daily.length);
@@ -234,8 +280,11 @@ function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskM
     }
   }
 
-  const sma50 = sma(points, 50);
-  const sma200 = sma(points, 200);
+  // Le medie mobili si chiamano "a 50 e 200 giorni": su una serie mensile le ultime
+  // 50 osservazioni sono quattro anni, e l'etichetta sarebbe falsa. Su una serie
+  // sparsa si omettono, e la lacuna viene dichiarata.
+  const sma50 = granularity === "daily" ? sma(points, 50) : null;
+  const sma200 = granularity === "daily" ? sma(points, 200) : null;
   let trend: string | null = null;
   if (sma50 !== null) {
     const above50 = last.gte(d(sma50));
@@ -249,6 +298,7 @@ function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskM
     to: lastPoint.date,
     last: lastPoint.close,
     spanDays: daysBetween(first.date, lastPoint.date),
+    granularity,
     high52w,
     low52w,
     fromHigh52w:
@@ -268,4 +318,4 @@ function riskMetrics(series: readonly PricePoint[], asOfDate: DateString): RiskM
   };
 }
 
-export { riskMetrics, TRADING_DAYS, MAX_BASE_GAP_DAYS, asOf as _asOf, sma as _sma };
+export { riskMetrics, TRADING_DAYS, MAX_BASE_GAP_DAYS, MAX_DAILY_GAP_DAYS, MAX_RETURN_GAP_DAYS, asOf as _asOf, sma as _sma };

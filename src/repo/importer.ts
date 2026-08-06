@@ -159,16 +159,27 @@ async function insertManualPrice(client: PoolClient, instrumentId: number, date:
  * analisi. Restituisce `true` solo se ha davvero inserito, così le statistiche
  * dell'import non mentono.
  *
- * Un'analisi incompleta si SALTA invece di inventarne i campi: `verdict` e
- * `confidence` hanno un CHECK constraint, e un dump modificato a mano non deve
- * poter far fallire l'intera transazione.
+ * Un'analisi non valida si SALTA invece di inventarne i campi. Non basta
+ * controllare che i campi CI SIANO: `verdict` e `confidence` hanno un CHECK
+ * constraint e `created_at` è un timestamp, quindi un `verdict: "BUY"` o un
+ * `createdAt: "ieri"` in un dump modificato a mano abortirebbero l'INTERA
+ * transazione — portandosi via portafogli, movimenti e prezzi già inseriti. I valori
+ * si validano qui, contro le stesse liste chiuse dello schema.
  */
+const IMPORT_VERDICTS = ["COMPRARE", "MANTENERE", "RIDURRE", "EVITARE", "APPROFONDIRE"];
+const IMPORT_CONFIDENCES = ["ALTA", "MEDIA", "BASSA"];
+
 async function insertAnalysis(
   client: PoolClient,
   instrumentId: number,
   a: ImportAnalysis
 ): Promise<boolean> {
-  if (!a?.verdict || !a?.confidence || !a?.model) return false;
+  if (!a?.model || typeof a.model !== "string") return false;
+  if (!IMPORT_VERDICTS.includes(String(a.verdict))) return false;
+  if (!IMPORT_CONFIDENCES.includes(String(a.confidence))) return false;
+  if (a.createdAt !== undefined && a.createdAt !== null) {
+    if (typeof a.createdAt !== "string" || Number.isNaN(new Date(a.createdAt).getTime())) return false;
+  }
 
   // Il duplicato si cerca PRIMA, con una SELECT, invece di affidarsi solo a
   // ON CONFLICT: l'inferenza del conflitto sul vincolo (instrument_id, created_at)

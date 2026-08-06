@@ -14,12 +14,19 @@ import type { AnalysisContext } from "./prompt";
 import type { AnalysisConfidence, AnalysisPayload, AnalysisUsage, AnalysisVerdict } from "../types";
 
 /**
- * `max_tokens` è un tetto su PENSIERO + RISPOSTA, non solo sulla risposta: con il
- * thinking adattivo attivo un valore stretto tronca l'analisi a metà. 16.000 è il
- * limite oltre il quale una richiesta NON in streaming rischia il timeout HTTP del
- * SDK, ed è abbondante per una scheda di questa dimensione.
+ * `max_tokens` è un tetto su PENSIERO + RISPOSTA, non solo sulla risposta.
+ *
+ * A sforzo `xhigh` o `max` il thinking adattivo da solo può consumare 16.000 token:
+ * la scheda arriverebbe con `stop_reason: "max_tokens"` — cioè un 502 «analisi
+ * troncata» DOPO aver pagato, ogni volta. Per quei due livelli il tetto sale a
+ * 64.000, che è quanto la guida del modello prescrive.
+ *
+ * Ed è il motivo per cui la richiesta è in STREAMING: sopra ~16.000 token una
+ * richiesta non in streaming rischia il timeout HTTP del SDK, quindi alzare il tetto
+ * senza streaming scambierebbe un troncamento con un timeout. `finalMessage()`
+ * restituisce il messaggio completo, quindi il resto del codice non cambia.
  */
-const MAX_TOKENS = 16_000;
+const maxTokensFor = (effort: string): number => (effort === "xhigh" || effort === "max" ? 64_000 : 16_000);
 
 /** Lo stesso vincolo dello schema JSON, ricontrollato in casa. */
 const payloadSchema = z.object({
@@ -91,11 +98,12 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
   const effort = config.ai.effort;
   const startedAt = Date.now();
 
+  const maxTokens = maxTokensFor(effort);
   let response: any;
   try {
-    response = await client.beta.messages.create({
+    const stream = client.beta.messages.stream({
       model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: maxTokens,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       // Thinking adattivo DICHIARATO invece che lasciato al default: sul modello
@@ -119,6 +127,9 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
       ],
       messages: [{ role: "user", content: buildUserPrompt(context) }],
     });
+    // Non si consumano gli eventi uno per uno: l'analisi non è mostrata mentre
+    // arriva, lo streaming serve solo a non incappare nel timeout HTTP.
+    response = await stream.finalMessage();
   } catch (e) {
     // Un 429 o un 5xx del provider non è un errore interno nostro: è un upstream
     // che non risponde, e la UI deve poter dire "riprova tra poco".
@@ -158,7 +169,7 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
   }
   if (response?.stop_reason === "max_tokens") {
     throw new AiError("upstream_error", "analisi troncata: risposta più lunga del limite", {
-      maxTokens: MAX_TOKENS,
+      maxTokens,
     });
   }
 
@@ -219,4 +230,4 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
   };
 }
 
-export { analyzeInstrument, MAX_TOKENS, payloadSchema, decisionSchema };
+export { analyzeInstrument, maxTokensFor, payloadSchema, decisionSchema };

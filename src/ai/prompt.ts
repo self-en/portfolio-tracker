@@ -305,7 +305,16 @@ function contextGaps(context: AnalysisContext): string[] {
   }
   if (!context.quote) gaps.push("nessuna quotazione corrente in archivio");
   if (context.priceCoverage.rows === 0) gaps.push("nessuno storico prezzi in archivio");
-  else if (!context.risk?.volatility) gaps.push("storico prezzi troppo corto per volatilità e drawdown");
+  else if (context.risk?.granularity === "sparse") {
+    // Il caso tipico del bond a prezzo inserito a mano: la serie esiste ma non ha
+    // passo giornaliero, quindi volatilità e medie mobili non sono calcolabili — e
+    // dirlo è meglio che calcolarle sbagliate (vedi `granularity` in riskMetrics).
+    gaps.push(
+      `serie prezzi non giornaliera (${context.risk.points} osservazioni in ${context.risk.spanDays} giorni): volatilità, medie mobili e trend non calcolabili`
+    );
+  } else if (!context.risk?.volatility) {
+    gaps.push("storico prezzi troppo corto per volatilità e drawdown");
+  }
   if (!context.position) gaps.push("nessuna posizione in portafoglio su questo strumento");
   return gaps;
 }

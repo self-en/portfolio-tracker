@@ -266,3 +266,24 @@ generatore di testo.
   parametro, come per tutto `domain/`.
 - **Non è consulenza finanziaria**, e il disclaimer viaggia nella risposta dell'API —
   non solo nella pagina — così ogni client lo mostra.
+
+### 12.1 Tre trappole trovate in review, e le regole che ne restano
+
+- **√252 vale solo su un passo giornaliero.** `riskMetrics` classifica la serie
+  (`granularity: "daily" | "sparse"`, mediana dei divari ≤ 4 giorni) e su una serie
+  sparsa NON calcola volatilità, medie mobili e trend. Su un BTP a pricing manuale —
+  una rilevazione al mese, che per le obbligazioni è la strada normale (§9) —
+  annualizzare rendimenti mensili con √252 sovrastima la volatilità di ~4,6 volte, e
+  quel numero finirebbe in un prompt che lo dichiara "annualizzato". Vale la stessa
+  regola per le SMA: "50 giorni" su una serie mensile sono quattro anni.
+- **I timestamp delle analisi sono troncati al MILLISECONDO** (`DEFAULT
+  date_trunc('milliseconds', now())`). `TIMESTAMPTZ` ha precisione al microsecondo, ma
+  il driver `pg` consegna un `Date` JS che si ferma al millisecondo: un timestamp con i
+  microsecondi non sopravvive al giro export → JSON → import, e la deduplicazione
+  dell'import fallirebbe *silenziosamente* duplicando le analisi a ogni reimport.
+  `date_trunc` è registrato anche nell'harness pg-mem (`test/helpers/memdb.ts`),
+  perché lo schema di produzione non si piega a un builtin mancante nel mock.
+- **"L'ultima analisi" si ordina per `created_at`, mai per `id`.** L'import conserva la
+  data originale e l'export emette dalla più recente: dopo un reimport la più recente
+  ha l'id più BASSO. Un `MAX(id)` faceva mostrare alla lista strumenti un verdetto
+  diverso da quello del dettaglio.

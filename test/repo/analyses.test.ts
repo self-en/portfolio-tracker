@@ -13,6 +13,7 @@ import { must } from "../helpers/must";
 
 import * as instrumentsRepo from "../../src/repo/instruments";
 import * as analysesRepo from "../../src/repo/analyses";
+import { runImport } from "../../src/repo/importer";
 import type { AnalysisPayload } from "../../src/types";
 
 const EQ = {
@@ -117,6 +118,45 @@ test("latestForMany: una sola query per la lista, l'ultima analisi per strumento
 
   // Lista vuota: nessuna query, nessun errore.
   assert.equal((await analysesRepo.latestForMany([])).size, 0);
+});
+
+test("latestForMany concorda con latest() anche quando l'id più alto è l'analisi più VECCHIA", async () => {
+  // È lo scenario del reimport: l'export emette dalla più recente, quindi la più
+  // recente viene inserita per prima e prende l'id più basso. Un `MAX(id)` avrebbe
+  // mostrato in lista un verdetto diverso da quello del dettaglio.
+  await freshMemDb();
+  const inst = must(await instrumentsRepo.create(EQ), "lo strumento");
+
+  // Si passa dal percorso VERO dell'import, quello che conserva le date: è lui a
+  // creare la situazione in cui id e cronologia divergono.
+  await runImport(async (db) => {
+    // Prima la più recente (come la emette l'export: `created_at DESC`).
+    await db.insertAnalysis(inst.id, {
+      ...input(inst.id, { verdict: "EVITARE" }),
+      createdAt: "2026-08-01T10:00:00.000Z",
+    });
+    await db.insertAnalysis(inst.id, {
+      ...input(inst.id, { verdict: "COMPRARE" }),
+      createdAt: "2026-02-01T10:00:00.000Z",
+    });
+  });
+
+  const storico = await analysesRepo.history(inst.id);
+  assert.equal(storico.length, 2);
+  const recente = must(
+    storico.find((a) => a.verdict === "EVITARE"),
+    "la più recente"
+  );
+  assert.ok(
+    storico.every((a) => a.id >= recente.id),
+    "controllo dello scenario: la più recente ha l'id più basso"
+  );
+
+  const latest = must(await analysesRepo.latest(inst.id), "l'ultima dal dettaglio");
+  const fromMap = must((await analysesRepo.latestForMany([inst.id])).get(inst.id), "l'ultima dalla lista");
+  assert.equal(latest.id, recente.id);
+  assert.equal(fromMap.id, latest.id, "lista e dettaglio devono dire la stessa cosa");
+  assert.equal(fromMap.verdict, "EVITARE");
 });
 
 test("byId e remove", async () => {

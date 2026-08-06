@@ -139,6 +139,54 @@ test("volatilità di una serie alternata: valore atteso calcolato a mano", () =>
   assert.ok(Math.abs(vol - 1.534598) < 0.0001, `volatilità ${vol} lontana dall'attesa 1,534598`);
 });
 
+test("serie MENSILE: nessuna volatilità annualizzata con √252, e la lacuna è dichiarabile", () => {
+  // IL CASO BTP: prezzo inserito a mano una volta al mese (docs/decisions.md §9).
+  // I rendimenti tra osservazioni consecutive sono MENSILI: annualizzarli con √252
+  // invece di √12 sovrastima la volatilità di circa 4,6 volte, e quel numero
+  // finirebbe in un prompt che lo dichiara "annualizzato".
+  const rows = Array.from({ length: 25 }, (_, i) => ({
+    date: addDays("2024-02-15", i * 30),
+    close: String(100 * (1 + (i % 2 === 0 ? 0.02 : -0.02))),
+  }));
+  const m = riskMetrics(rows, addDays("2024-02-15", 24 * 30));
+
+  assert.equal(m.granularity, "sparse");
+  assert.equal(m.volatility, null, "√252 non si applica a rendimenti mensili");
+  assert.equal(m.sma50, null, "50 osservazioni mensili non sono 50 giorni");
+  assert.equal(m.sma200, null);
+  assert.equal(m.trend, null);
+  // Ciò che resta valido resta: prezzo, range, drawdown, rendimenti per orizzonte.
+  assert.ok(m.maxDrawdown, "il drawdown non dipende dal passo della serie");
+  assert.ok(m.points === 25);
+});
+
+test("un solo buco lungo NON declassa una serie giornaliera (mediana, non media)", () => {
+  // 40 giorni consecutivi, una pausa di tre settimane, altri 40 giorni: la mediana
+  // dei divari resta 1 giorno, quindi la serie è giornaliera. Il rendimento a
+  // cavallo del buco viene però escluso dalla deviazione standard.
+  const primaMeta = Array.from({ length: 40 }, (_, i) => ({ date: addDays("2026-01-01", i), close: String(100 + i) }));
+  const secondaMeta = Array.from({ length: 40 }, (_, i) => ({ date: addDays("2026-03-01", i), close: String(140 + i) }));
+  const m = riskMetrics([...primaMeta, ...secondaMeta], "2026-04-15");
+  assert.equal(m.granularity, "daily");
+  assert.ok(m.volatility !== null, "la serie è giornaliera: la volatilità si calcola");
+});
+
+test("le metriche non guardano OLTRE la data di riferimento", () => {
+  // Un prezzo manuale con data futura, o una richiesta su una data storica: `last`,
+  // le medie e il drawdown devono fermarsi ad asOfDate, altrimenti il modulo non è
+  // deterministico rispetto al parametro che dichiara di rispettare.
+  const rows = [
+    { date: "2025-01-10", close: "100" },
+    { date: "2025-06-10", close: "120" },
+    { date: "2026-06-10", close: "300" },
+  ];
+  const m = riskMetrics(rows, "2025-07-01");
+  assert.equal(m.points, 2);
+  assert.equal(m.last, "120");
+  assert.equal(m.to, "2025-06-10");
+  assert.equal(must(m.high52w, "il massimo").close, "120", "il 300 è nel futuro: non esiste");
+});
+
 test("SMA e trend: null finché la finestra non è piena", () => {
   const closes = Array.from({ length: 60 }, (_, i) => String(100 + i));
   const m = riskMetrics(series("2026-01-01", closes), "2026-03-01");

@@ -32,7 +32,14 @@ CREATE TABLE IF NOT EXISTS instrument_analyses (
   context       JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- Token consumati: è l'unico modo di sapere quanto è costata la funzione.
   usage         JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- `date_trunc('milliseconds', ...)` e non `now()` nudo: `TIMESTAMPTZ` ha
+  -- precisione al MICROsecondo, ma il driver `pg` lo consegna come `Date` JS, che
+  -- arriva solo al millisecondo. Un timestamp con i microsecondi sopravvive in
+  -- colonna ma NON al giro export → JSON → import: il confronto per la
+  -- deduplicazione fallirebbe (`.123` ≠ `.123456`) e il reimport dello stesso
+  -- backup duplicherebbe le analisi a ogni giro. Troncando alla precisione che il
+  -- filo sa esprimere, l'idempotenza documentata è vera anche su Postgres.
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT date_trunc('milliseconds', now()),
   -- Unico su (strumento, istante): due analisi dello stesso titolo nello stesso
   -- istante non esistono, e questo vincolo è ciò che rende l'IMPORT IDEMPOTENTE —
   -- reimportare lo stesso backup non moltiplica le analisi (ON CONFLICT DO NOTHING
