@@ -87,32 +87,63 @@ L'app richiede due variabili. Senza, **non crasha**: entra in *locked mode* —
 schermata di configurazione. Su questa piattaforma un crashloop significa nessun log
 leggibile nella UI, quindi degradare in modo diagnosticabile è preferibile.
 
-| Variabile        | Obbligatoria | Default | Note                                                      |
-| ---------------- | :----------: | ------- | --------------------------------------------------------- |
-| `APP_PASSWORD`   |      sì      | —       | password unica di accesso                                  |
-| `SESSION_SECRET` |      sì      | —       | ≥32 caratteri. **Non viene auto-generata**: lo farebbe invalidare ogni sessione a ogni deploy, nascondendo la misconfigurazione |
-| `COOKIE_SECURE`  |      no      | `false` | **lasciare false** finché la piattaforma serve `http://` — vedi sotto |
-| `SCHEDULER_ENABLED` |   no      | `true`  | `false` in sviluppo locale                                 |
-| `LOG_LEVEL`      |      no      | `info`  |                                                            |
-| `MARKET_PROVIDER`|      no      | `yahoo` | `manual` disattiva ogni chiamata di rete                   |
-| `BACKFILL_YEARS` |      no      | `2`     | ampiezza dello storico quando non ci sono transazioni      |
-| `ANTHROPIC_API_KEY` |   no      | —       | abilita l'[analisi con Claude](#analisi-di-bilancio-con-claude). Senza, il pulsante resta spento e il resto dell'app funziona come prima |
-| `ANALYSIS_MODEL` |      no      | `claude-opus-5` | il modello per cui i prompt sono scritti              |
-| `ANALYSIS_EFFORT`|      no      | `high`  | `low` … `max`: profondità del ragionamento (e costo)       |
-| `ANALYSIS_TIMEOUT_MS` |  no     | `180000`| un'analisi può durare minuti                               |
-| `ANALYSIS_RATE_LIMIT` |  no     | `20`    | analisi/ora: protegge la bolletta, non dal brute force     |
+### Le tre voci della pagina Configurazione
+
+Sono le SOLE dichiarate in [`self-en.json`](self-en.json), e quindi le sole che
+compaiono nel form del pannello. Il criterio è netto: **nel form ci va ciò che un
+essere umano deve decidere**, non ogni variabile che il codice legge.
+
+| Variabile           | Obbligatoria | Note                                                    |
+| ------------------- | :----------: | ------------------------------------------------------- |
+| `APP_PASSWORD`      |      sì      | password unica di accesso                                |
+| `SESSION_SECRET`    |      sì      | ≥32 caratteri. **Non viene auto-generata**: lo farebbe invalidare ogni sessione a ogni deploy, nascondendo la misconfigurazione |
+| `ANTHROPIC_API_KEY` |      no      | abilita l'[analisi con Claude](#analisi-di-bilancio-con-claude). Senza, il pulsante resta spento e il resto dell'app funziona come prima |
+
+### Le manopole: solo da ambiente, non nel form
+
+Hanno tutte un default sensato e servono allo sviluppo o alla messa a punto: metterle
+nel form significherebbe chiedere a chi installa l'app di decidere quindici cose che
+non vuole decidere. Restano leggibili da `process.env` perché `src/config.ts` è
+dichiarato come `configModule` nel contratto, e in quanto tale è **esente** dal
+controllo che pretende la dichiarazione (vedi `scripts/check-contract.mjs`).
+
+| Variabile        | Default | Note                                                      |
+| ---------------- | ------- | --------------------------------------------------------- |
+| `COOKIE_SECURE`  | `false` | **lasciare false** finché la piattaforma serve `http://` — vedi sotto |
+| `COOKIE_NAME` · `SESSION_TTL_DAYS` · `SESSION_RENEW_DAYS` | `pt_session` · `30` · `7` | cookie e durata della sessione |
+| `SCHEDULER_ENABLED` | `true` | `false` in sviluppo locale                               |
+| `SCHEDULER_TZ`   | `Europe/Rome` | fuso orario dei cron                                  |
+| `LOG_LEVEL`      | `info`  | iniettata dalla piattaforma                                |
+| `MARKET_PROVIDER`| `yahoo` | `manual` disattiva ogni chiamata di rete (è il valore usato dai test) |
+| `FX_API_URL` · `BACKFILL_YEARS` | Frankfurter v2 · `2` | fonte dei cambi, ampiezza del backfill |
+| `PG_POOL_MAX` · `PG_STATEMENT_TIMEOUT_MS` | `8` · `15000` | pool e timeout delle query |
+| `LOGIN_ATTEMPTS` · `LOGIN_WINDOW_MS` · `GLOBAL_RATE_LIMIT` | `10` · `900000` · `300` | rate limit |
+| `ANALYSIS_MODEL` | `claude-opus-5` | il modello per cui i prompt sono scritti           |
+| `ANALYSIS_EFFORT`| `high`  | `low` … `max`: profondità del ragionamento (e costo)       |
+| `ANALYSIS_TIMEOUT_MS` | `180000` | un'analisi può durare minuti                          |
+| `ANALYSIS_RATE_LIMIT` | `20` | analisi/ora: protegge la bolletta, non dal brute force     |
+| `TZ`             | —       | fuso del processo (il container gira in UTC)               |
 
 ### Impostare i segreti (dalla pagina Configurazione)
 
-`APP_PASSWORD` e `SESSION_SECRET` si impostano dal pannello **nedo**: apri il
-progetto → **Configurazione**, compila i due campi (c'è un pulsante "genera") e
-salva. La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non
-passano da questo repository, e la versione riparte da sola.
+`APP_PASSWORD`, `SESSION_SECRET` e — se vuoi l'analisi con Claude —
+`ANTHROPIC_API_KEY` si impostano dal pannello **nedo**: apri il progetto →
+**Configurazione**, compila i campi (i primi due hanno il pulsante "genera") e salva.
+La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non passano da
+questo repository, e la versione riparte da sola.
 
-Le due variabili sono dichiarate in [`self-en.json`](self-en.json), che è ciò che
-fa comparire etichetta, descrizione e pulsante "genera" nel form: se in futuro
-l'app avrà bisogno di un'altra variabile, va aggiunta lì nello stesso commit.
-Ogni variabile può valere per tutte le versioni o solo per la produzione.
+Quelle tre voci sono dichiarate in [`self-en.json`](self-en.json), che è ciò che fa
+comparire etichetta, descrizione e pulsante "genera" nel form. Ogni variabile può
+valere per tutte le versioni o solo per la produzione.
+
+**Cosa va dichiarato lì e cosa no.** Il form è per le decisioni che spettano a una
+persona: una password, una chiave a pagamento. Le manopole con un default sensato
+(fuso dei cron, dimensione del pool, modello dell'analisi…) restano leggibili
+dall'ambiente ma **fuori** dal form, perché quindici campi da non toccare rendono
+invisibili i due che contano. È possibile perché `src/config.ts` è il `configModule`
+dichiarato nel contratto, quindi esente dal controllo che pretende la dichiarazione di
+ogni `process.env`. Regola pratica: **se l'app non parte senza quel valore, o se
+costa soldi, va nel form; altrimenti no.**
 
 Finché i valori non sono impostati l'app resta in **locked mode** (503
 `not_configured` su `/api/*`, `/healthz` 200), non in crashloop: un crashloop su

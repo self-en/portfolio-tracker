@@ -287,3 +287,22 @@ generatore di testo.
   data originale e l'export emette dalla più recente: dopo un reimport la più recente
   ha l'id più BASSO. Un `MAX(id)` faceva mostrare alla lista strumenti un verdetto
   diverso da quello del dettaglio.
+
+### 10.1 Cosa si dichiara in `self-en.json` (e cosa no)
+
+`self-en.json` non è l'elenco delle variabili che il codice legge: è l'elenco dei
+campi che il pannello **Configurazione** mostra a una persona. Ci vanno solo:
+
+- i valori **senza i quali l'app non parte** (`APP_PASSWORD`, `SESSION_SECRET`:
+  mancandoli si entra in locked mode, e la piattaforma deve poterli chiedere);
+- i valori che **costano soldi** (`ANTHROPIC_API_KEY`).
+
+Tutto il resto — fuso dei cron, dimensione del pool, provider di mercato, modello e
+sforzo dell'analisi — resta leggibile da `process.env` con un default sensato ma
+**fuori dal form**: quindici campi che nessuno deve toccare rendono invisibili i due
+che contano. È lecito perché `src/config.ts` è il `configModule` dichiarato nel
+contratto, e i moduli di configurazione sono esenti dal controllo che pretende la
+dichiarazione di ogni `process.env` (`scripts/check-contract.mjs`).
+
+Il controllo continua a fare il suo lavoro dove serve: un `process.env` in un
+qualsiasi ALTRO file resta un errore di build.
