@@ -8,11 +8,13 @@
 //   getCorporateActions(symbol,f,t) -> { dividends: [{ exDate, amount }], splits: [{ date, ratio }] }
 //   getUpcomingDividend(symbol)     -> { exDate, payDate, amountPerUnit } | null
 //   resolveSymbol(query)            -> [{ symbol, name, exchange, quoteType, currency, score }]
+//   getFundamentals(symbol)         -> { profile, valuation, profitability, balance, ... } | null
 import config from "../config";
 import { createYahooProvider } from "./yahooProvider";
 import type {
   NormalizedBar,
   NormalizedEvents,
+  NormalizedFundamentals,
   NormalizedQuote,
   NormalizedSearchHit,
   UpcomingDividend,
@@ -37,6 +39,11 @@ function createManualProvider(): MarketProvider {
     async resolveSymbol() {
       return [];
     },
+    // Nessun fondamentale senza rete: l'analisi lavorerà sui soli dati nostri e lo
+    // dichiarerà. È il caso NORMALE per le obbligazioni, non un errore.
+    async getFundamentals() {
+      return null;
+    },
   };
 }
 
@@ -56,6 +63,8 @@ export interface MarketProvider {
   getCorporateActions(symbol: string, from: string, to: string): Promise<NormalizedEvents>;
   getUpcomingDividend(symbol: string): Promise<UpcomingDividend | null>;
   resolveSymbol(query: string): Promise<NormalizedSearchHit[]>;
+  /** `null` quando il provider non ha fondamentali da dare (provider `manual`). */
+  getFundamentals(symbol: string): Promise<NormalizedFundamentals | null>;
 }
 
 let cached: MarketProvider | null = null;

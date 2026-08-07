@@ -6,6 +6,7 @@ import { DASH, date as fmtDate, dateTime, num, pct } from "../format";
 import DataTable from "../components/DataTable";
 import Drawer from "../components/Drawer";
 import EmptyState from "../components/EmptyState";
+import InstrumentAnalysis from "../components/InstrumentAnalysis";
 import InstrumentForm from "../components/InstrumentForm";
 import ManualPriceForm from "../components/ManualPriceForm";
 import Spinner from "../components/Spinner";
@@ -253,6 +254,10 @@ export default function InstrumentDetail() {
         ) : null}
         <ManualPriceForm instrument={inst} lastPrice={inst.latestQuote?.price} />
       </section>
+
+      {/* Sopra il grafico e i dettagli: è la domanda che si porta l'utente aprendo
+          la scheda di un titolo ("ci investo o no?"), non un extra da fondo pagina. */}
+      <InstrumentAnalysis instrument={inst} />
 
       <section className="card">
         <h2 className="card-title">Andamento del prezzo</h2>

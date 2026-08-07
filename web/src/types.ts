@@ -126,6 +126,14 @@ export interface Instrument {
   couponSchedule?: CouponScheduleEntry[];
   currentYield?: Amount;
   warnings?: Warning[];
+  /** Il verdetto dell'ultima analisi, solo nella LISTA (GET /api/instruments). */
+  latestAnalysis?: {
+    id: number;
+    verdict: AnalysisVerdict;
+    confidence: AnalysisConfidence;
+    headline: string;
+    createdAt: string;
+  } | null;
 }
 
 export interface InstrumentsResponse {
@@ -158,6 +166,92 @@ export interface SymbolHit {
 export interface SymbolSearchResponse {
   items: SymbolHit[];
   cached: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Analisi con Claude
+// ---------------------------------------------------------------------------
+
+/** Le liste chiuse: le stesse dei CHECK constraint in 004_instrument_analyses.sql. */
+export type AnalysisVerdict = "COMPRARE" | "MANTENERE" | "RIDURRE" | "EVITARE" | "APPROFONDIRE";
+export type AnalysisConfidence = "ALTA" | "MEDIA" | "BASSA";
+export type AnalysisSeverity = "ALTA" | "MEDIA" | "BASSA";
+
+/** L'output strutturato del modello (`analysis` nella risposta). */
+export interface AnalysisPayload {
+  headline: string;
+  summary: string;
+  /** L'analisi di bilancio. `score` va da 1 (fragile) a 5 (solido). */
+  financialHealth: { score: number; label: string; notes: string[] };
+  valuation: { assessment: string; notes: string[] };
+  strengths: Array<{ title: string; detail: string }>;
+  risks: Array<{ title: string; detail: string; severity: AnalysisSeverity }>;
+  positionAdvice: string;
+  watchlist: string[];
+  dataGaps: string[];
+}
+
+/**
+ * Su quali dati è stata fatta l'analisi.
+ *
+ * È il riassunto dello snapshot conservato in database: senza, un verdetto di sei
+ * mesi fa resterebbe leggibile ma non più giudicabile.
+ */
+export interface AnalysisBasis {
+  generatedAt: string;
+  provider: string | null;
+  quotePrice: Amount;
+  quoteAsOf: string | null;
+  fundamentalsAsOf: DateString | null;
+  priceRows: number | null;
+  hadPosition: boolean;
+  /** I dati che mancavano, calcolati dal server sul contesto (non autodichiarati). */
+  gaps: string[];
+}
+
+/** Un'analisi completa: `latest` in GET /api/instruments/:id/analysis. */
+export interface InstrumentAnalysis {
+  id: number;
+  instrumentId: number;
+  createdAt: string;
+  model: string;
+  effort: string | null;
+  /** Il modello che ha risposto davvero: con un fallback può differire da `model`. */
+  servedBy: string | null;
+  verdict: AnalysisVerdict;
+  confidence: AnalysisConfidence;
+  headline: string;
+  analysis: AnalysisPayload;
+  usage: { inputTokens: number | null; outputTokens: number | null };
+  basis: AnalysisBasis;
+}
+
+/** La voce ridotta dello storico: serve a scegliere, non a leggere. */
+export interface InstrumentAnalysisBrief {
+  id: number;
+  createdAt: string;
+  verdict: AnalysisVerdict;
+  confidence: AnalysisConfidence;
+  headline: string;
+  model: string;
+}
+
+/** GET /api/instruments/:id/analysis. */
+export interface AnalysisResponse {
+  instrumentId: number;
+  /** false quando ANTHROPIC_API_KEY non è impostata: la UI spiega invece di fallire. */
+  configured: boolean;
+  model: string;
+  latest: InstrumentAnalysis | null;
+  previous: InstrumentAnalysisBrief[];
+  disclaimer: string;
+}
+
+/** POST /api/instruments/:id/analysis. */
+export interface AnalysisCreatedResponse {
+  instrumentId: number;
+  analysis: InstrumentAnalysis;
+  durationMs: number;
 }
 
 // ---------------------------------------------------------------------------

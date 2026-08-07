@@ -1,8 +1,9 @@
 # portfolio-tracker
 
 Gestione del portafoglio personale di investimenti: **dashboard degli andamenti**,
-**lista movimenti**, **calendario cedole e dividendi** e **prelievo online dei dati
-di mercato**. Azioni, ETF e obbligazioni, valuta base EUR con conversione FX.
+**lista movimenti**, **calendario cedole e dividendi**, **prelievo online dei dati
+di mercato** e **analisi di bilancio dei singoli strumenti con Claude**. Azioni, ETF
+e obbligazioni, valuta base EUR con conversione FX.
 
 Inserimento dati **manuale** (nessun import CSV, nessun parser di estratti conto) e
 un solo utente, protetto da password.
@@ -18,6 +19,7 @@ un solo utente, protetto da password.
 - [API](#api)
 - [Backup: l'export non è opzionale](#backup-lexport-non-è-opzionale)
 - [Osservabilità](#osservabilità)
+- [Analisi di bilancio con Claude](#analisi-di-bilancio-con-claude)
 - [Cosa NON fa (v1)](#cosa-non-fa-v1)
 
 ## Avvio rapido
@@ -85,27 +87,63 @@ L'app richiede due variabili. Senza, **non crasha**: entra in *locked mode* —
 schermata di configurazione. Su questa piattaforma un crashloop significa nessun log
 leggibile nella UI, quindi degradare in modo diagnosticabile è preferibile.
 
-| Variabile        | Obbligatoria | Default | Note                                                      |
-| ---------------- | :----------: | ------- | --------------------------------------------------------- |
-| `APP_PASSWORD`   |      sì      | —       | password unica di accesso                                  |
-| `SESSION_SECRET` |      sì      | —       | ≥32 caratteri. **Non viene auto-generata**: lo farebbe invalidare ogni sessione a ogni deploy, nascondendo la misconfigurazione |
-| `COOKIE_SECURE`  |      no      | `false` | **lasciare false** finché la piattaforma serve `http://` — vedi sotto |
-| `SCHEDULER_ENABLED` |   no      | `true`  | `false` in sviluppo locale                                 |
-| `LOG_LEVEL`      |      no      | `info`  |                                                            |
-| `MARKET_PROVIDER`|      no      | `yahoo` | `manual` disattiva ogni chiamata di rete                   |
-| `BACKFILL_YEARS` |      no      | `2`     | ampiezza dello storico quando non ci sono transazioni      |
+### Le tre voci della pagina Configurazione
+
+Sono le SOLE dichiarate in [`self-en.json`](self-en.json), e quindi le sole che
+compaiono nel form del pannello. Il criterio è netto: **nel form ci va ciò che un
+essere umano deve decidere**, non ogni variabile che il codice legge.
+
+| Variabile           | Obbligatoria | Note                                                    |
+| ------------------- | :----------: | ------------------------------------------------------- |
+| `APP_PASSWORD`      |      sì      | password unica di accesso                                |
+| `SESSION_SECRET`    |      sì      | ≥32 caratteri. **Non viene auto-generata**: lo farebbe invalidare ogni sessione a ogni deploy, nascondendo la misconfigurazione |
+| `ANTHROPIC_API_KEY` |      no      | abilita l'[analisi con Claude](#analisi-di-bilancio-con-claude). Senza, il pulsante resta spento e il resto dell'app funziona come prima |
+
+### Le manopole: solo da ambiente, non nel form
+
+Hanno tutte un default sensato e servono allo sviluppo o alla messa a punto: metterle
+nel form significherebbe chiedere a chi installa l'app di decidere quindici cose che
+non vuole decidere. Restano leggibili da `process.env` perché `src/config.ts` è
+dichiarato come `configModule` nel contratto, e in quanto tale è **esente** dal
+controllo che pretende la dichiarazione (vedi `scripts/check-contract.mjs`).
+
+| Variabile        | Default | Note                                                      |
+| ---------------- | ------- | --------------------------------------------------------- |
+| `COOKIE_SECURE`  | `false` | **lasciare false** finché la piattaforma serve `http://` — vedi sotto |
+| `COOKIE_NAME` · `SESSION_TTL_DAYS` · `SESSION_RENEW_DAYS` | `pt_session` · `30` · `7` | cookie e durata della sessione |
+| `SCHEDULER_ENABLED` | `true` | `false` in sviluppo locale                               |
+| `SCHEDULER_TZ`   | `Europe/Rome` | fuso orario dei cron                                  |
+| `LOG_LEVEL`      | `info`  | iniettata dalla piattaforma                                |
+| `MARKET_PROVIDER`| `yahoo` | `manual` disattiva ogni chiamata di rete (è il valore usato dai test) |
+| `FX_API_URL` · `BACKFILL_YEARS` | Frankfurter v2 · `2` | fonte dei cambi, ampiezza del backfill |
+| `PG_POOL_MAX` · `PG_STATEMENT_TIMEOUT_MS` | `8` · `15000` | pool e timeout delle query |
+| `LOGIN_ATTEMPTS` · `LOGIN_WINDOW_MS` · `GLOBAL_RATE_LIMIT` | `10` · `900000` · `300` | rate limit |
+| `ANALYSIS_MODEL` | `claude-opus-5` | il modello per cui i prompt sono scritti           |
+| `ANALYSIS_EFFORT`| `high`  | `low` … `max`: profondità del ragionamento (e costo)       |
+| `ANALYSIS_TIMEOUT_MS` | `180000` | un'analisi può durare minuti                          |
+| `ANALYSIS_RATE_LIMIT` | `20` | analisi/ora: protegge la bolletta, non dal brute force     |
+| `TZ`             | —       | fuso del processo (il container gira in UTC)               |
 
 ### Impostare i segreti (dalla pagina Configurazione)
 
-`APP_PASSWORD` e `SESSION_SECRET` si impostano dal pannello **nedo**: apri il
-progetto → **Configurazione**, compila i due campi (c'è un pulsante "genera") e
-salva. La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non
-passano da questo repository, e la versione riparte da sola.
+`APP_PASSWORD`, `SESSION_SECRET` e — se vuoi l'analisi con Claude —
+`ANTHROPIC_API_KEY` si impostano dal pannello **nedo**: apri il progetto →
+**Configurazione**, compila i campi (i primi due hanno il pulsante "genera") e salva.
+La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non passano da
+questo repository, e la versione riparte da sola.
 
-Le due variabili sono dichiarate in [`self-en.json`](self-en.json), che è ciò che
-fa comparire etichetta, descrizione e pulsante "genera" nel form: se in futuro
-l'app avrà bisogno di un'altra variabile, va aggiunta lì nello stesso commit.
-Ogni variabile può valere per tutte le versioni o solo per la produzione.
+Quelle tre voci sono dichiarate in [`self-en.json`](self-en.json), che è ciò che fa
+comparire etichetta, descrizione e pulsante "genera" nel form. Ogni variabile può
+valere per tutte le versioni o solo per la produzione.
+
+**Cosa va dichiarato lì e cosa no.** Il form è per le decisioni che spettano a una
+persona: una password, una chiave a pagamento. Le manopole con un default sensato
+(fuso dei cron, dimensione del pool, modello dell'analisi…) restano leggibili
+dall'ambiente ma **fuori** dal form, perché quindici campi da non toccare rendono
+invisibili i due che contano. È possibile perché `src/config.ts` è il `configModule`
+dichiarato nel contratto, quindi esente dal controllo che pretende la dichiarazione di
+ogni `process.env`. Regola pratica: **se l'app non parte senza quel valore, o se
+costa soldi, va nel form; altrimenti no.**
 
 Finché i valori non sono impostati l'app resta in **locked mode** (503
 `not_configured` su `/api/*`, `/healthz` 200), non in crashloop: un crashloop su
@@ -152,10 +190,11 @@ src/
   repo/                  l'UNICO posto con SQL. Numerici come stringa.
   domain/                PURO. Zero I/O. La superficie di unit test.
   market/                provider, tolerant, refresher, scheduler
+  ai/                    analisi con Claude: prompt PURI + client + validazione
   http/                  auth, validate, errors, serialize, routes/ (plugin Fastify)
 self-en.json             le variabili d'ambiente che l'app dichiara alla piattaforma
 web/                     SPA Vite + React
-test/                    domain/ market/ repo/ http/ db/ + fixtures/
+test/                    domain/ market/ repo/ http/ db/ ai/ + fixtures/
 docs/decisions.md        le convenzioni bloccate — leggilo prima di contribuire
 ```
 
@@ -165,14 +204,15 @@ sono gate della CI insieme ai test: niente immagine se uno dei tre è rosso.
 
 ### Confini fatti rispettare da test automatici
 
-Non sono linee guida: tre test falliscono se vengono violati.
+Non sono linee guida: cinque test falliscono se vengono violati.
 
 | Modulo        | Può importare                 | Non può                                            |
 | ------------- | ----------------------------- | -------------------------------------------------- |
 | `src/domain/` | **solo `decimal.js`**         | `pg`, `logger`, `Date.now()` — il tempo è parametro |
 | `src/repo/`   | `pg`, `domain/`               | provider di mercato, fastify                        |
 | `src/market/` | provider, `repo/`, `logger`   | **mai `domain/`**                                  |
-| `src/http/`   | `repo/`, `domain/`, `market/` | SQL inline                                         |
+| `src/http/`   | `repo/`, `domain/`, `market/`, `ai/` | SQL inline                                  |
+| `src/ai/`     | `config`, `logger`, SDK Anthropic | `pg`, `repo/`, `db/`, fastify                  |
 
 `domain/` è puro e senza I/O: è ciò che rende la matematica finanziaria — il 70% del
 rischio — verificabile in locale, dove un database non c'è.
@@ -231,13 +271,17 @@ default perché dipendono dalla rete e dal rate limit di un IP condiviso.
 
 Prefisso `/api`. Denaro e quantità **sempre stringhe**, date sempre `YYYY-MM-DD`.
 Errori: `{ error: { code, message, details? } }` con codici
-`unauthorized | not_found | validation_error | conflict | db_unavailable | not_configured | upstream_error | rate_limited`.
+`unauthorized | not_found | validation_error | conflict | db_unavailable | not_configured | ai_unavailable | upstream_error | rate_limited`.
+
+`ai_unavailable` è distinto da `not_configured` di proposito: il secondo significa
+"l'**app** non è configurata" e nella SPA apre la schermata di configurazione, il
+primo "l'app funziona, manca solo la chiave per l'analisi".
 
 | Gruppo       | Endpoint                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------- |
 | auth         | `POST /auth/login` · `POST /auth/logout` · `GET /auth/me`                                     |
 | system       | `GET /healthz` (non autenticato) · `GET /api/system/status`                                    |
-| strumenti    | `GET POST /instruments` · `GET PATCH DELETE /instruments/:id` · `GET PUT /instruments/:id/prices` · `POST /instruments/:id/refresh` |
+| strumenti    | `GET POST /instruments` · `GET PATCH DELETE /instruments/:id` · `GET PUT /instruments/:id/prices` · `POST /instruments/:id/refresh` · **`GET POST /instruments/:id/analysis`** |
 | movimenti    | `GET POST /transactions` · `GET PATCH DELETE /transactions/:id` · **`POST /transactions/preview`** |
 | portafogli   | `GET POST /portfolios` · `PATCH DELETE /portfolios/:id`                                       |
 | portafoglio  | `/portfolio/summary` · `/positions` · `/value-series` · `/allocation` · `/returns` · `/income` |
@@ -257,9 +301,11 @@ Due endpoint meritano attenzione:
 
 ### Cadenza di refresh
 
-Gli handler HTTP **non chiamano mai** un provider in modo sincrono; due sole
-eccezioni, entrambe azioni utente: `GET /market/search` (con LRU e debounce) e
-`POST /market/refresh` (rate-limit 1/min).
+Gli handler HTTP **non chiamano mai** un provider in modo sincrono; tre sole
+eccezioni, tutte azioni utente esplicite: `GET /market/search` (con LRU e debounce),
+`POST /market/refresh` (rate-limit 1/min) e `POST /instruments/:id/analysis`
+(rate-limit 20/ora) — quest'ultima perché i fondamentali servono *adesso* per
+costruire il prompt: accodarli produrrebbe un'analisi su dati che arrivano dopo.
 
 | Job              | Cadenza (Europe/Rome)                       |
 | ---------------- | ------------------------------------------- |
@@ -283,6 +329,40 @@ perché le **calcoliamo** dallo scadenzario (`src/domain/bonds.ts`, generato
 all'indietro dalla scadenza): è questo che fa funzionare il calendario con copertura
 provider pari a zero.
 
+## Analisi di bilancio con Claude
+
+Sulla scheda di un singolo strumento (`/strumenti/:id`) un pulsante genera una
+**scheda decisionale**: solidità di bilancio, valutazione, punti di forza, rischi con
+la loro gravità, cosa implica per la posizione già in portafoglio, cosa monitorare, e
+— con lo stesso peso — **i dati che mancavano**. Nella lista degli strumenti resta il
+verdetto dell'ultima analisi, così si vede subito cosa è già stato valutato.
+
+Il contesto passato al modello non è solo il bilancio, perché il bilancio da solo non
+risponde alla domanda "ci investo?":
+
+| Blocco | Da dove viene | Perché |
+| --- | --- | --- |
+| bilancio e conto economico | `quoteSummary` (`financialData`, `defaultKeyStatistics`, `earnings`) | indebitamento, liquidità, flussi di cassa, margini, ROE/ROA e il **trend** su quattro esercizi |
+| profilo | `assetProfile` | settore, industria, paese, attività: il contesto qualitativo |
+| costi e composizione (ETF/fondi) | `fundProfile`, `topHoldings` | su un ETF non c'è un bilancio: contano TER, dimensione e concentrazione |
+| prezzo e rischio | **i nostri prezzi**, `src/domain/riskMetrics.ts` | volatilità, max drawdown, distanza dai massimi a 52 settimane, medie mobili — calcolati in casa, quindi disponibili anche dove la copertura del provider è zero. Volatilità e medie mobili **solo su una serie giornaliera**: su un bond a prezzo manuale (una rilevazione al mese) `√252` e "SMA 50 giorni" sarebbero etichette false, e al loro posto compare una lacuna dichiarata |
+| scadenzario | `src/domain/bonds.ts` | per un'obbligazione il "bilancio" è la sequenza di cedole |
+| la tua posizione | `GET /portfolio/positions` (stesso percorso) | quantità, costo medio, latente, peso: sposta la domanda da "è una buona azienda" a "devo comprarne ancora" |
+
+Scelte che vale la pena conoscere prima di metterci le mani (motivate in
+[docs/decisions.md §12](docs/decisions.md)):
+
+- **Senza `ANTHROPIC_API_KEY` la funzione è spenta, non rotta**: la risposta porta
+  `configured: false`, la pagina spiega cosa impostare, tutto il resto funziona.
+- **Output strutturato** (`output_config.format`) più validazione zod: un verdetto
+  fuori lista viene respinto prima del database, non dopo.
+- **Niente generazione automatica**: ogni analisi è una chiamata a pagamento e parte
+  solo da un click, con rate limit a 20/ora.
+- **Lo storico non si sovrascrive**: confrontare due analisi a mesi di distanza è il
+  dato più interessante che questa funzione produce.
+- **Non è consulenza finanziaria** e non tocca nessun numero del portafoglio: il
+  modello non scrive prezzi, quantità o valorizzazioni — solo prosa.
+
 ## Backup: l'export non è opzionale
 
 **Cancellare il branch distrugge il suo database.** I dati reali vivono sull'env di
@@ -299,6 +379,11 @@ strumenti sono riconciliati per ISIN/ticker (non per id, che non sopravvivono), 
 **prezzi manuali sono sempre inclusi** perché nessun provider può rigenerarli, e le
 cedole proiettate vengono **rigenerate** invece di essere importate.
 
+Anche le **analisi con Claude sono sempre incluse**, con il loro snapshot dei dati di
+ingresso: sono fotografie datate e nessun provider le rigenera — rifarle domani dà
+un'altra analisi, e costa. Il reimport è idempotente (chiave: strumento + istante),
+quindi ripetere lo stesso backup non le duplica.
+
 ## Osservabilità
 
 Sul solo branch `main` la piattaforma abilita OpenTelemetry: **trace**, **metriche** e
@@ -307,7 +392,8 @@ Grafana. I log passano da `pino`, quindi ogni record porta `trace_id`/`span_id`.
 
 Senza Grafana, `GET /api/system/status` riporta readiness, migrazioni applicate e
 pendenti, leadership dello scheduler, ultimo esito di ogni job di refresh, fuso orario
-risolto e `warnings[]`.
+risolto, stato dell'analisi con Claude (configurata, modello, sforzo, quante analisi
+sono già state generate) e `warnings[]`.
 
 ## Cosa NON fa (v1)
 
@@ -324,3 +410,8 @@ hardcoded) · PWA/offline.
 sono tenute come tre voci separate e mai sommate in un unico "profitto", perché il
 trattamento fiscale italiano differisce per involucro. Riconcilia sempre con
 l'estratto conto del broker.
+
+**E non è consulenza finanziaria.** L'analisi con Claude è una lettura dei dati in
+archivio: non conosce la tua situazione, non ha accesso a internet, non vede notizie
+successive ai dati che le passiamo, e i suoi verdetti sono etichette su un
+ragionamento — non raccomandazioni. Verifica i numeri alla fonte prima di decidere.

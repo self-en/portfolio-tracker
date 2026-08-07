@@ -27,6 +27,26 @@ for (const name of ["pg_advisory_lock", "pg_try_advisory_lock", "pg_advisory_unl
     implementation: () => (name === "pg_advisory_lock" ? "" : true),
   });
 }
+// `date_trunc(text, timestamptz)`: pg-mem non lo implementa e la migrazione 004 lo
+// usa come DEFAULT di `instrument_analyses.created_at` (troncare al millisecondo è
+// ciò che rende idempotente il reimport delle analisi — vedi docs/decisions.md §12.1).
+// Senza questa registrazione il server di sviluppo non parte più. L'equivalente per i
+// test sta in test/helpers/memdb.ts.
+db.public.registerFunction({
+  name: "date_trunc",
+  args: [db.public.getType("text"), db.public.getType("timestamptz")],
+  returns: db.public.getType("timestamptz"),
+  implementation: (unit, at) => {
+    if (at === null || at === undefined) return null;
+    const dt = at instanceof Date ? new Date(at.getTime()) : new Date(String(at));
+    if (Number.isNaN(dt.getTime())) return null;
+    // Un `Date` JS è già al millisecondo: per 'milliseconds' la funzione è l'identità.
+    if (unit === "second") return new Date(Math.floor(dt.getTime() / 1000) * 1000);
+    if (unit === "day") return new Date(`${dt.toISOString().slice(0, 10)}T00:00:00.000Z`);
+    return dt;
+  },
+});
+
 const { Pool } = db.adapters.createPg();
 const memPool = new Pool();
 pool._setPool(memPool);

@@ -3,6 +3,7 @@ import { state } from "../../boot";
 import { knownVersions } from "../../db/migrate";
 
 import * as refreshLog from "../../repo/refreshLog";
+import * as analysesRepo from "../../repo/analyses";
 import type { FastifyPluginAsync } from "fastify";
 
 
@@ -20,6 +21,7 @@ const router: FastifyPluginAsync = async (app) => {
     if (!state.ready) warnings.push({ code: "db_unavailable", details: state.db.error });
 
     let lastRuns = {};
+    let analysesCount: number | null = null;
     if (state.ready) {
       try {
         // Ultimo esito per job, per rendere osservabile lo scheduler senza Grafana.
@@ -28,6 +30,12 @@ const router: FastifyPluginAsync = async (app) => {
         lastRuns = await refreshLog.lastRuns();
       } catch {
         // refresh_log può non esistere ancora: non è un errore da propagare.
+      }
+      try {
+        analysesCount = await analysesRepo.count();
+      } catch {
+        // instrument_analyses può non esistere ancora (migrazione 004 non applicata):
+        // la diagnostica deve restare leggibile proprio in quel caso.
       }
     }
 
@@ -53,6 +61,15 @@ const router: FastifyPluginAsync = async (app) => {
         lastRuns,
       },
       provider: config.market.provider,
+      // Analisi con Claude: `configured: false` è uno stato NORMALE (la funzione è
+      // opzionale), quindi non produce un warning — ma va reso osservabile, insieme a
+      // quante analisi sono già state pagate.
+      ai: {
+        configured: config.ai.configured,
+        model: config.ai.model,
+        effort: config.ai.effort,
+        analyses: analysesCount,
+      },
       // Utile per diagnosticare il fuso: il container gira in UTC ma i cron
       // dicono Europe/Rome (verifica §9.7).
       time: {

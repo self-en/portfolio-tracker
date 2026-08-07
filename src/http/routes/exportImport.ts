@@ -14,6 +14,7 @@ import * as instrumentsRepo from "../../repo/instruments";
 import * as txRepo from "../../repo/transactions";
 import * as eventsRepo from "../../repo/events";
 import * as pricesRepo from "../../repo/prices";
+import * as analysesRepo from "../../repo/analyses";
 import { validation, conflict } from "../errors";
 import { z, body, query } from "../validate";
 import { regenerateProjected } from "./instruments";
@@ -55,6 +56,10 @@ const router: FastifyPluginAsync = async (app) => {
       transactions,
       events: events.map((e) => ({ ...e, instrument: undefined })),
       manualPrices: [],
+      // Le analisi con Claude SÌ, sempre: sono fotografie datate (fatte su quel
+      // bilancio, con quel prezzo, con quella posizione) e nessun provider le
+      // rigenera — rifarle domani dà un'altra analisi, e costa.
+      analyses: [],
     };
 
     for (const inst of instruments) {
@@ -67,6 +72,25 @@ const router: FastifyPluginAsync = async (app) => {
           prices: manual.map((p) => ({ date: p.date, close: p.close })),
         });
       }
+      const analyses = await analysesRepo.history(inst.id, 100);
+      if (analyses.length) {
+        dump.analyses.push({
+          instrumentIsin: inst.isin,
+          instrumentTicker: inst.ticker,
+          items: analyses.map((a) => ({
+            createdAt: a.createdAt,
+            model: a.model,
+            effort: a.effort,
+            verdict: a.verdict,
+            confidence: a.confidence,
+            headline: a.headline,
+            analysis: a.analysis,
+            context: a.context,
+            usage: a.usage,
+          })),
+        });
+      }
+
       if (includePrices) {
         dump.prices = dump.prices || [];
         dump.prices.push({
@@ -92,7 +116,7 @@ const router: FastifyPluginAsync = async (app) => {
       );
     }
 
-    const stats: Record<string, any> = { portfolios: 0, instruments: 0, transactions: 0, events: 0, manualPrices: 0, skipped: [] };
+    const stats: Record<string, any> = { portfolios: 0, instruments: 0, transactions: 0, events: 0, manualPrices: 0, analyses: 0, skipped: [] };
 
     // Tutto in UNA transazione: un import a metà lascerebbe movimenti orfani, che
     // è peggio di un import fallito. L'SQL vive in repo/importer.js; qui resta solo
@@ -158,6 +182,20 @@ const router: FastifyPluginAsync = async (app) => {
           stats.manualPrices += 1;
         }
       }
+
+      // Analisi: stessa riconciliazione per ISIN/ticker. Idempotenti per costruzione
+      // (indice unico su instrument_id + created_at), quindi reimportare lo stesso
+      // backup non le duplica.
+      for (const group of dump.analyses) {
+        const key = group.instrumentIsin
+          ? `isin:${group.instrumentIsin}`
+          : `ticker:${group.instrumentTicker}`;
+        const id = instrumentIdByKey.get(key);
+        if (!id) continue;
+        for (const a of (group.items as unknown[]) || []) {
+          if (await db.insertAnalysis(id, a as never)) stats.analyses += 1;
+        }
+      }
     });
 
     // Le cedole proiettate si RIGENERANO invece di essere importate: sono derivate.
@@ -178,6 +216,7 @@ const importBody = z.object({
   transactions: z.array(z.record(z.string(), z.unknown())).default([]),
   events: z.array(z.record(z.string(), z.unknown())).default([]),
   manualPrices: z.array(z.record(z.string(), z.unknown())).default([]),
+  analyses: z.array(z.record(z.string(), z.unknown())).default([]),
   // Senza `replace: true` l'import è ADDITIVO e non distrugge nulla: il default
   // sicuro è quello che non perde dati.
   replace: z.boolean().default(false),

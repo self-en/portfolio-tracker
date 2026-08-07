@@ -13,11 +13,14 @@
 // indipendente dal driver (pg-mem, per esempio, non passa dai type parser di pg).
 import { normalizeDate } from "../domain/calendar";
 import type {
+  AnalysisPayload,
+  AnalysisUsage,
   DateString,
   DbRow,
   FxRate,
   IncomeEvent,
   Instrument,
+  InstrumentAnalysis,
   Portfolio,
   Price,
   Quote,
@@ -161,6 +164,43 @@ const incomeEvent = (r: DbRow | null | undefined): IncomeEvent | null =>
       };
 
 /**
+ * Un'analisi con Claude.
+ *
+ * `analysis`, `context` e `usage` sono JSONB: `pg` li restituisce già come oggetti,
+ * ma pg-mem (con cui girano i test in locale) può restituire la STRINGA — quindi il
+ * parse difensivo non è pignoleria, è ciò che tiene il test e la produzione sulla
+ * stessa forma.
+ */
+const jsonOf = <T,>(v: unknown, dflt: T): T => {
+  if (v === null || v === undefined) return dflt;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      return dflt;
+    }
+  }
+  return v as T;
+};
+
+const instrumentAnalysis = (r: DbRow | null | undefined): InstrumentAnalysis | null =>
+  r == null
+    ? null
+    : {
+        id: Number(r.id),
+        instrumentId: Number(r.instrument_id),
+        model: r.model,
+        effort: r.effort,
+        verdict: r.verdict,
+        confidence: r.confidence,
+        headline: r.headline,
+        analysis: jsonOf(r.analysis, {} as AnalysisPayload),
+        context: jsonOf(r.context, {} as Record<string, unknown>),
+        usage: jsonOf(r.usage, { inputTokens: null, outputTokens: null } as AnalysisUsage),
+        createdAt: r.created_at,
+      };
+
+/**
  * Mappa un elenco di righe scartando i null.
  *
  * I mapper qui sopra ammettono null perche' servono anche per `r[0]` di un
@@ -172,4 +212,4 @@ function mapAll<T>(list: readonly DbRow[], map: (r: DbRow) => T | null): T[] {
   return list.map(map).filter((x): x is T => x !== null);
 }
 
-export { instrument, transaction, portfolio, price, quote, fxRate, incomeEvent, mapAll };
+export { instrument, transaction, portfolio, price, quote, fxRate, incomeEvent, instrumentAnalysis, mapAll };

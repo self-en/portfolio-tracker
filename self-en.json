@@ -18,97 +18,11 @@
       "generate": "secret32"
     },
     {
-      "key": "COOKIE_NAME",
-      "label": "Nome del cookie di sessione",
+      "key": "ANTHROPIC_API_KEY",
+      "label": "Chiave API di Anthropic (analisi con Claude)",
+      "description": "Abilita l'analisi di bilancio degli strumenti nella pagina Strumenti. Senza, quel pulsante resta spento e tutto il resto dell'app funziona come prima. Ogni analisi è una chiamata a pagamento.",
       "required": false,
-      "secret": false
-    },
-    {
-      "key": "COOKIE_SECURE",
-      "label": "Cookie solo via HTTPS",
-      "required": false,
-      "secret": false,
-      "description": "Lascialo vuoto o 'false' finche' gli ambienti sono serviti in http:// semplice: un cookie Secure viene scartato in silenzio dal browser."
-    },
-    {
-      "key": "SESSION_TTL_DAYS",
-      "label": "Durata della sessione (giorni)",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "SESSION_RENEW_DAYS",
-      "label": "Rinnovo della sessione (giorni rimanenti)",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "PG_POOL_MAX",
-      "label": "Connessioni massime al database",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "PG_STATEMENT_TIMEOUT_MS",
-      "label": "Timeout di una query (ms)",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "MARKET_PROVIDER",
-      "label": "Fonte dei prezzi",
-      "required": false,
-      "secret": false,
-      "description": "'yahoo' (default) oppure 'manual' per disattivare ogni chiamata di rete."
-    },
-    {
-      "key": "FX_API_URL",
-      "label": "Endpoint dei tassi di cambio",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "BACKFILL_YEARS",
-      "label": "Anni di storico da recuperare",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "SCHEDULER_ENABLED",
-      "label": "Aggiornamenti automatici attivi",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "SCHEDULER_TZ",
-      "label": "Fuso orario degli aggiornamenti",
-      "required": false,
-      "secret": false,
-      "description": "Es. Europe/Rome: decide a che ora locale girano i job."
-    },
-    {
-      "key": "LOGIN_ATTEMPTS",
-      "label": "Tentativi di login consentiti",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "LOGIN_WINDOW_MS",
-      "label": "Finestra dei tentativi di login (ms)",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "GLOBAL_RATE_LIMIT",
-      "label": "Richieste al minuto consentite",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "TZ",
-      "label": "Fuso orario del processo",
-      "required": false,
-      "secret": false
+      "secret": true
     }
   ],
   "configModule": [
