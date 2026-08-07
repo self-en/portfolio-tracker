@@ -292,11 +292,13 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
         toast.error(`Troppe analisi in poco tempo: riprova tra ${e.retryAfterSec ?? 60} secondi.`);
         return;
       }
-      // Il server allega il messaggio dell'upstream sui 4xx (una richiesta che il
-      // provider non accetta): mostrarlo evita di dover aprire i log per capire
-      // perché un pulsante non ha funzionato.
-      const upstream = (e.details as { upstream?: string } | null)?.upstream;
-      toast.error(`Analisi non completata: ${e.message}${upstream ? ` — ${upstream}` : ""}`);
+      // Il server allega un `hint` pensato per l'utente (es. rate limit: "riprova
+      // tra qualche minuto") oppure, sui 4xx, il messaggio grezzo dell'upstream:
+      // mostrarlo evita di dover aprire i log per capire perché un pulsante non
+      // ha funzionato. Il hint ha priorità perché è scritto per essere letto.
+      const details = e.details as { hint?: string; upstream?: string } | null;
+      const extra = details?.hint || details?.upstream;
+      toast.error(`Analisi non completata: ${e.message}${extra ? ` — ${extra}` : ""}`);
     },
   });
 
