@@ -349,12 +349,12 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
 
       {/* Non configurata: si spiega COSA impostare. Un pulsante spento senza motivo
           è il modo più rapido di far pensare che la funzione sia rotta.
-          `data &&`: se la GET è FALLITA non sappiamo se la chiave c'è, e accusare la
+          `data &&`: se la GET è FALLITA non sappiamo se il token c'è, e accusare la
           configurazione manderebbe l'utente a cercare un problema che non ha. */}
       {data && !configured ? (
         <div className="form-note form-note--warn">
           L'analisi con Claude non è configurata su questo ambiente: imposta{" "}
-          <code>ANTHROPIC_API_KEY</code> dalla pagina Configurazione del progetto. Il resto
+          <code>CLAUDE_CODE_OAUTH_TOKEN</code> dalla pagina Configurazione del progetto. Il resto
           dell'applicazione funziona normalmente.
         </div>
       ) : null}

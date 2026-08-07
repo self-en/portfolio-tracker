@@ -308,16 +308,16 @@ const router: FastifyPluginAsync = async (app) => {
       const inst = await instrumentsRepo.byId(req.valid.params.id);
       if (!inst) throw notFound("strumento non trovato");
 
-      // Prima di costruire il contesto: senza chiave non c'è motivo di interrogare
+      // Prima di costruire il contesto: senza il token non c'è motivo di interrogare
       // il provider e di valorizzare il portafoglio per poi fallire.
       if (!isConfigured()) {
         throw err("ai_unavailable", "l'analisi con Claude non è configurata", {
-          hint: "imposta ANTHROPIC_API_KEY dalla pagina Configurazione del progetto",
+          hint: "imposta CLAUDE_CODE_OAUTH_TOKEN dalla pagina Configurazione del progetto",
         });
       }
 
       // Il limite si consuma QUI e non in un preHandler: un id inesistente (404),
-      // un id malformato (422) o la chiave mancante (503) non costano niente, e
+      // un id malformato (422) o il token mancante (503) non costano niente, e
       // bruciare per loro una delle 20 analisi/ora punirebbe l'utente per un errore
       // che non gli è costato un centesimo. `hit()` conta e decide, l'hook no.
       const limit = analysisLimiter.hit(req.ip || "unknown");

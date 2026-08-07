@@ -21,6 +21,12 @@ const logger = pino({
       "*.SESSION_SECRET",
       "PGPASSWORD",
       "DATABASE_URL",
+      // Il Bearer è già coperto da headers.authorization, ma il token può finire
+      // in un oggetto di contesto per altre vie: qui non dipende dal chiamante.
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "*.CLAUDE_CODE_OAUTH_TOKEN",
+      "authToken",
+      "*.authToken",
       "cookie",
       "*.cookie",
       "headers.cookie",

@@ -239,7 +239,7 @@ export interface InstrumentAnalysisBrief {
 /** GET /api/instruments/:id/analysis. */
 export interface AnalysisResponse {
   instrumentId: number;
-  /** false quando ANTHROPIC_API_KEY non è impostata: la UI spiega invece di fallire. */
+  /** false quando CLAUDE_CODE_OAUTH_TOKEN non è impostato: la UI spiega invece di fallire. */
   configured: boolean;
   model: string;
   latest: InstrumentAnalysis | null;
