@@ -178,10 +178,10 @@ test("setup: app, strumenti, ledger e prezzi", async () => {
 // Funzione non configurata: si spiega, non si rompe
 // ---------------------------------------------------------------------------
 
-test("GET senza chiave API: risponde 200 dicendo che non è configurata", async () => {
-  // Il resto dell'app funziona senza ANTHROPIC_API_KEY: la pagina deve poter
+test("GET senza token: risponde 200 dicendo che non è configurata", async () => {
+  // Il resto dell'app funziona senza CLAUDE_CODE_OAUTH_TOKEN: la pagina deve poter
   // spiegare perché il pulsante è spento, e per farlo le serve una risposta.
-  assert.equal(config.ai.configured, false, "l'ambiente di test non ha la chiave");
+  assert.equal(config.ai.configured, false, "l'ambiente di test non ha il token");
   const r = await api(`/api/instruments/${ids.eq}/analysis`);
   assert.equal(r.status, 200);
   assert.equal(r.body.configured, false);
@@ -191,14 +191,14 @@ test("GET senza chiave API: risponde 200 dicendo che non è configurata", async 
   assert.equal(r.body.model, "claude-opus-5");
 });
 
-test("POST senza chiave API: 503 ai_unavailable, NON not_configured", async () => {
+test("POST senza token: 503 ai_unavailable, NON not_configured", async () => {
   // `not_configured` nella SPA significa "l'APP non è configurata" e apre la
   // schermata di configurazione: usarlo qui manderebbe l'utente a impostare
   // APP_PASSWORD per un'analisi mancante.
   const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
   assert.equal(r.status, 503);
   assert.equal(r.body.error.code, "ai_unavailable");
-  assert.match(JSON.stringify(r.body.error.details), /ANTHROPIC_API_KEY/);
+  assert.match(JSON.stringify(r.body.error.details), /CLAUDE_CODE_OAUTH_TOKEN/);
 });
 
 test("GET su uno strumento inesistente: 404", async () => {

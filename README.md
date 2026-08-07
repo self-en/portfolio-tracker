@@ -97,7 +97,7 @@ essere umano deve decidere**, non ogni variabile che il codice legge.
 | ------------------- | :----------: | ------------------------------------------------------- |
 | `APP_PASSWORD`      |      sì      | password unica di accesso                                |
 | `SESSION_SECRET`    |      sì      | ≥32 caratteri. **Non viene auto-generata**: lo farebbe invalidare ogni sessione a ogni deploy, nascondendo la misconfigurazione |
-| `ANTHROPIC_API_KEY` |      no      | abilita l'[analisi con Claude](#analisi-di-bilancio-con-claude). Senza, il pulsante resta spento e il resto dell'app funziona come prima |
+| `CLAUDE_CODE_OAUTH_TOKEN` |      no      | abilita l'[analisi con Claude](#analisi-di-bilancio-con-claude). Senza, il pulsante resta spento e il resto dell'app funziona come prima |
 
 ### Le manopole: solo da ambiente, non nel form
 
@@ -127,7 +127,7 @@ controllo che pretende la dichiarazione (vedi `scripts/check-contract.mjs`).
 ### Impostare i segreti (dalla pagina Configurazione)
 
 `APP_PASSWORD`, `SESSION_SECRET` e — se vuoi l'analisi con Claude —
-`ANTHROPIC_API_KEY` si impostano dal pannello **nedo**: apri il progetto →
+`CLAUDE_CODE_OAUTH_TOKEN` si impostano dal pannello **nedo**: apri il progetto →
 **Configurazione**, compila i campi (i primi due hanno il pulsante "genera") e salva.
 La piattaforma li consegna al pod come Secret Kubernetes (`envFrom`), non passano da
 questo repository, e la versione riparte da sola.
@@ -137,7 +137,7 @@ comparire etichetta, descrizione e pulsante "genera" nel form. Ogni variabile pu
 valere per tutte le versioni o solo per la produzione.
 
 **Cosa va dichiarato lì e cosa no.** Il form è per le decisioni che spettano a una
-persona: una password, una chiave a pagamento. Le manopole con un default sensato
+persona: una password, una credenziale che costa. Le manopole con un default sensato
 (fuso dei cron, dimensione del pool, modello dell'analisi…) restano leggibili
 dall'ambiente ma **fuori** dal form, perché quindici campi da non toccare rendono
 invisibili i due che contano. È possibile perché `src/config.ts` è il `configModule`
@@ -275,7 +275,7 @@ Errori: `{ error: { code, message, details? } }` con codici
 
 `ai_unavailable` è distinto da `not_configured` di proposito: il secondo significa
 "l'**app** non è configurata" e nella SPA apre la schermata di configurazione, il
-primo "l'app funziona, manca solo la chiave per l'analisi".
+primo "l'app funziona, manca solo il token per l'analisi".
 
 | Gruppo       | Endpoint                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------- |
@@ -352,7 +352,7 @@ risponde alla domanda "ci investo?":
 Scelte che vale la pena conoscere prima di metterci le mani (motivate in
 [docs/decisions.md §12](docs/decisions.md)):
 
-- **Senza `ANTHROPIC_API_KEY` la funzione è spenta, non rotta**: la risposta porta
+- **Senza `CLAUDE_CODE_OAUTH_TOKEN` la funzione è spenta, non rotta**: la risposta porta
   `configured: false`, la pagina spiega cosa impostare, tutto il resto funziona.
 - **Output strutturato** (`output_config.format`) più validazione zod: un verdetto
   fuori lista viene respinto prima del database, non dopo.

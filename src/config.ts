@@ -45,7 +45,7 @@ function build() {
   // ogni deploy, nascondendo la misconfigurazione dietro un "ogni tanto devo
   // rifare il login". Meglio un locked mode rumoroso.
 
-  const anthropicKey = (process.env.ANTHROPIC_API_KEY || "").trim();
+  const oauthToken = (process.env.CLAUDE_CODE_OAUTH_TOKEN || "").trim();
 
   // Un livello di sforzo scritto male (`ANALYSIS_EFFORT=alto`) sarebbe un 400 dal
   // provider a ogni analisi, cioè una funzione rotta a runtime per un errore di
@@ -108,14 +108,14 @@ function build() {
       timezone: process.env.SCHEDULER_TZ || "Europe/Rome",
     },
 
-    // Analisi dello strumento con Claude. SENZA CHIAVE LA FUNZIONE È SPENTA, NON
+    // Analisi dello strumento con Claude. SENZA TOKEN LA FUNZIONE È SPENTA, NON
     // ROTTA: `configured: false` viaggia nella risposta, la UI disattiva il pulsante
     // e spiega cosa impostare. Non è un motivo di locked mode — il portafoglio
     // funziona benissimo senza analisi, e trattare una funzione opzionale come una
     // configurazione obbligatoria bloccherebbe l'intera app per un extra.
     ai: {
-      configured: !!anthropicKey,
-      apiKey: anthropicKey,
+      configured: !!oauthToken,
+      authToken: oauthToken,
       model: process.env.ANALYSIS_MODEL || DEFAULT_MODEL,
       effort: analysisEffort,
       // Un'analisi con thinking adattivo su un bilancio intero può durare minuti:
@@ -152,7 +152,7 @@ if (!config.db.configured) {
 }
 if (!config.ai.configured) {
   logger.info(
-    "[config] ANTHROPIC_API_KEY assente: l'analisi degli strumenti con Claude resta disattivata"
+    "[config] CLAUDE_CODE_OAUTH_TOKEN assente: l'analisi degli strumenti con Claude resta disattivata"
   );
 }
 

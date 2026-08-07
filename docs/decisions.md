@@ -222,7 +222,7 @@ calcolati da `domain/` e serializzati come nel resto dell'API. È il confine che
 tiene la matematica finanziaria — il 70% del rischio — fuori dalla portata di un
 generatore di testo.
 
-- **Senza `ANTHROPIC_API_KEY` la funzione è spenta, non rotta.** Non è un motivo di
+- **Senza `CLAUDE_CODE_OAUTH_TOKEN` la funzione è spenta, non rotta.** Non è un motivo di
   locked mode: il portafoglio funziona benissimo senza analisi. `GET` risponde 200 con
   `configured: false`, `POST` risponde **`ai_unavailable`** (503) — codice distinto da
   `not_configured`, che nella SPA significa "l'app non è configurata" e aprirebbe la
@@ -295,7 +295,7 @@ campi che il pannello **Configurazione** mostra a una persona. Ci vanno solo:
 
 - i valori **senza i quali l'app non parte** (`APP_PASSWORD`, `SESSION_SECRET`:
   mancandoli si entra in locked mode, e la piattaforma deve poterli chiedere);
-- i valori che **costano soldi** (`ANTHROPIC_API_KEY`).
+- i valori che **costano soldi o quota** (`CLAUDE_CODE_OAUTH_TOKEN`).
 
 Tutto il resto — fuso dei cron, dimensione del pool, provider di mercato, modello e
 sforzo dell'analisi — resta leggibile da `process.env` con un default sensato ma

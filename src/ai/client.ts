@@ -5,7 +5,7 @@
 // `http/errors`: solleva i propri errori con un `code`, ed è il layer HTTP a
 // tradurli in una risposta (esattamente come `UpstreamUnavailable` in market/).
 //
-// Il `require` è LAZY di proposito, come per yahoo-finance2: senza chiave API il
+// Il `require` è LAZY di proposito, come per yahoo-finance2: senza il token il
 // modulo non viene nemmeno caricato, e su un pod da poche centinaia di megabyte non
 // pagare un SDK che non si usa è una scelta, non un dettaglio.
 import config from "../config";
@@ -33,7 +33,7 @@ class AiError extends Error {
 
 const disabled = (): AiError =>
   new AiError("ai_unavailable", "l'analisi con Claude non è configurata", {
-    hint: "imposta ANTHROPIC_API_KEY dalla pagina Configurazione del progetto",
+    hint: "imposta CLAUDE_CODE_OAUTH_TOKEN dalla pagina Configurazione del progetto",
   });
 
 let cached: Anthropic | null = null;
@@ -56,7 +56,18 @@ function createAiClient(): Anthropic {
   const mod = require("@anthropic-ai/sdk") as { default: typeof Anthropic };
   const Ctor = mod.default;
   cached = new Ctor({
-    apiKey: config.ai.apiKey,
+    // Un token OAuth va su `Authorization: Bearer`, non su `x-api-key`: nel SDK
+    // è l'opzione `authToken`, non `apiKey`.
+    authToken: config.ai.authToken,
+    // ESPLICITO, e non ridondante: se non passi `apiKey`, il SDK lo legge da solo
+    // dall'ambiente (la vecchia variabile della chiave Console). Con entrambi
+    // valorizzati manda `x-api-key` E `Authorization`, e l'API rifiuta una
+    // richiesta con due credenziali: 401 su ogni analisi, con un messaggio che
+    // parla di credenziali non valide e non dice che il problema è averne due.
+    // Questo null è ciò che rende innocua una chiave dimenticata nel Secret.
+    apiKey: null,
+    // /v1/messages non accetta un token OAuth senza questo header.
+    defaultHeaders: { "anthropic-beta": "oauth-2025-04-20" },
     timeout: config.ai.timeoutMs,
     maxRetries: 1,
   });

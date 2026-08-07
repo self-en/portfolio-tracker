@@ -18,9 +18,9 @@
       "generate": "secret32"
     },
     {
-      "key": "ANTHROPIC_API_KEY",
-      "label": "Chiave API di Anthropic (analisi con Claude)",
-      "description": "Abilita l'analisi di bilancio degli strumenti nella pagina Strumenti. Senza, quel pulsante resta spento e tutto il resto dell'app funziona come prima. Ogni analisi è una chiamata a pagamento.",
+      "key": "CLAUDE_CODE_OAUTH_TOKEN",
+      "label": "Token OAuth di Claude (analisi con Claude)",
+      "description": "Abilita l'analisi di bilancio degli strumenti nella pagina Strumenti. Senza, quel pulsante resta spento e tutto il resto dell'app funziona come prima. Ogni analisi consuma quota dell'abbonamento.",
       "required": false,
       "secret": true
     }
