@@ -121,7 +121,7 @@ tutta la matematica. `settle_date` è informativa.
 | `src/domain/`  | **solo `decimal.js`**               | `pg`, `logger`, `Date.now()` — il tempo è parametro  |
 | `src/repo/`    | `pg`, `domain/`                     | provider di mercato, fastify                        |
 | `src/market/`  | provider, `repo/`, `logger`         | **mai `domain/`**                                   |
-| `src/ai/`      | `config`, `logger`, SDK Anthropic   | `pg`, `db/`, `repo/`, fastify — vedi §12            |
+| `src/ai/`      | `config`, `logger`, Claude Agent SDK | `pg`, `db/`, `repo/`, fastify — vedi §12           |
 | `src/http/`    | `repo/`, `domain/`, `market/`, `ai/` | SQL inline                                         |
 
 `domain/` è puro e senza I/O: è la superficie di unit test, ed è ciò che rende la
@@ -239,10 +239,30 @@ generatore di testo.
   provider in modo sincrono; `POST /instruments/:id/analysis` si aggiunge a
   `/market/search` e `/market/refresh` perché i fondamentali servono *adesso* per
   costruire il prompt.
-- **Output strutturato + doppia guardia.** Lo schema JSON (`output_config.format`)
-  vincola il modello; zod rivalida in casa; il `CHECK` constraint è l'ultima rete.
-  Verdetto e confidenza sono liste chiuse dichiarate in tre posti che devono restare
-  allineati: `src/ai/prompt.ts`, `004_instrument_analyses.sql`, `web/src/types.ts`.
+- **Si passa dal Claude Agent SDK, non dall'API Messages.** La credenziale che il
+  deployment possiede è `CLAUDE_CODE_OAUTH_TOKEN`, cioè il token di Claude Code.
+  Puntato direttamente su `/v1/messages` viene accettato ma consuma i limiti
+  dell'abbonamento invece di quelli di una chiave API: il risultato erano **429
+  `rate_limit_error` su ogni analisi**, identici su dev e su main. `@anthropic-ai/sdk`
+  resta fra le dipendenze perché è una *peer* dell'Agent SDK, non perché lo chiamiamo.
+  Il prezzo da pagare è l'eseguibile di Claude Code (~280 MB) nell'immagine: per
+  questo il caricamento è `import()` dinamico e lazy, e senza token non si tocca.
+- **L'agente è confinato: `tools: []` e `settingSources: []`.** Sono le due righe che
+  trasformano un agente di programmazione in un analista di bilanci. Senza la prima
+  potrebbe leggere e scrivere il filesystem del container; senza la seconda si
+  caricherebbe il `CLAUDE.md` del repository dentro un prompt che deve parlare solo di
+  finanza — pagandolo, e sbilanciando l'analisi. `persistSession: false` perché il
+  contesto completo è già in database. Verificate da un test su `buildQueryOptions`,
+  che è pura apposta.
+- **Una chiave API dimenticata nell'ambiente non deve scavalcare il token.**
+  `subprocessEnv()` cancella `ANTHROPIC_API_KEY` e `ANTHROPIC_AUTH_TOKEN` prima di
+  lanciare il sottoprocesso: altrimenti il CLI le preferirebbe, addebitando le analisi
+  su un altro account. È l'erede dell'`apiKey: null` che serviva al client HTTP.
+- **Output strutturato + doppia guardia.** Lo schema JSON (`outputFormat`) vincola il
+  modello e torna in `structured_output`; zod rivalida in casa; il `CHECK` constraint è
+  l'ultima rete. Verdetto e confidenza sono liste chiuse dichiarate in tre posti che
+  devono restare allineati: `src/ai/prompt.ts`, `004_instrument_analyses.sql`,
+  `web/src/types.ts`.
 - **Il prompt di sistema è il prefisso in cache: non contiene dati dello strumento.**
   I dati vivono nel turno utente. Il blocco specifico per classe di attivo si
   **appende** al prefisso comune, così le classi sono cinque prefissi memorizzabili
@@ -258,7 +278,7 @@ generatore di testo.
 - **`src/ai/` è un modulo di confine, come `src/market/`.** Riceve un contesto già
   assemblato e restituisce un risultato validato: non conosce `pg`, `repo/`, `db/` né
   fastify, e solleva errori con un `code` che il layer HTTP traduce. È ciò che rende
-  l'intero percorso provabile con un client finto (`_setClient`), senza spendere un
+  l'intero percorso provabile con un runner finto (`_setClient`), senza spendere un
   euro a ogni `npm test`.
 - **`domain/riskMetrics.ts` calcola volatilità, drawdown e distanze dai massimi sui
   NOSTRI prezzi**, non li chiede al provider: così esistono anche dove la copertura è
