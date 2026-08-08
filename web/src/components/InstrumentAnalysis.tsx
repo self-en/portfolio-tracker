@@ -12,6 +12,7 @@
 //  3. **Non fingere di essere un consiglio.** Il verdetto è un'etichetta su
 //     un'analisi di dati, non una raccomandazione: il disclaimer arriva dal server ed
 //     è sempre visibile.
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, post } from "../api";
 import { DASH, dateTime, num } from "../format";
@@ -20,8 +21,8 @@ import Spinner from "./Spinner";
 import { useToast } from "./Toast";
 import type { ReactNode } from "react";
 import type {
-  AnalysisCreatedResponse,
   AnalysisResponse,
+  AnalysisStartedResponse,
   AnalysisVerdict,
   Instrument,
   InstrumentAnalysis as Analysis,
@@ -243,50 +244,24 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
   const id = instrument.id;
   const queryKey = ["instruments", "analysis", id];
 
+  // L'analisi vera dura da decine di secondi a qualche minuto (effort adattivo):
+  // troppo per una singola richiesta HTTP, quindi la POST accoda e torna subito, e
+  // questa query fa polling di `pending`/`lastJob` finché il lavoro non finisce —
+  // vedi il commento in src/http/routes/analysis.ts sul perché (un gateway davanti
+  // all'app chiuderebbe la connessione prima che Claude risponda).
   const state = useQuery({
     queryKey,
     queryFn: ({ signal }) => get<AnalysisResponse>(`/instruments/${id}/analysis`, { signal }),
+    refetchInterval: (query) => (query.state.data?.pending ? 3000 : false),
   });
+  const pending = !!state.data?.pending;
 
-  const run = useMutation<AnalysisCreatedResponse, ApiError>({
-    mutationFn: () => post<AnalysisCreatedResponse>(`/instruments/${id}/analysis`),
-    onSuccess: (created) => {
-      // Si scrive direttamente la cache: la risposta della POST È l'analisi, e un
-      // refetch farebbe aspettare per riottenere ciò che si ha già in mano.
-      //
-      // `prev` può essere `undefined`: un'analisi dura minuti, e se nel frattempo la
-      // pagina è stata lasciata la query può essere stata raccolta dal garbage
-      // collector di react-query. In quel caso l'updater NON deve restituire `prev`
-      // (sarebbe un no-op silenzioso, con la scheda appena pagata che non compare):
-      // si lascia decidere all'invalidate qui sotto, che rilegge dal server.
-      queryClient.setQueryData<AnalysisResponse>(queryKey, (prev) =>
-        prev
-          ? {
-              ...prev,
-              latest: created.analysis,
-              previous: prev.latest
-                ? [
-                    {
-                      id: prev.latest.id,
-                      createdAt: prev.latest.createdAt,
-                      verdict: prev.latest.verdict,
-                      confidence: prev.latest.confidence,
-                      headline: prev.latest.headline,
-                      model: prev.latest.model,
-                    },
-                    ...prev.previous,
-                  ]
-                : prev.previous,
-            }
-          : undefined
-      );
-      // Rete di sicurezza: se la cache era vuota (vedi sopra) questo la ricostruisce,
-      // e in ogni caso riallinea `previous` al limite che applica il server.
-      queryClient.invalidateQueries({ queryKey });
-      // La lista degli strumenti mostra il verdetto: va rinfrescata.
-      queryClient.invalidateQueries({ queryKey: ["instruments", "list"] });
-      toast.success(`Analisi completata in ${Math.round(created.durationMs / 1000)} secondi.`);
-    },
+  const run = useMutation<AnalysisStartedResponse, ApiError>({
+    mutationFn: () => post<AnalysisStartedResponse>(`/instruments/${id}/analysis`),
+    // La risposta della POST non porta più l'analisi: dice solo "accodata". Il
+    // risultato arriva dal polling qui sopra, che l'invalidate fa partire subito
+    // invece di aspettare i prossimi 3 secondi.
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey }),
     onError: (e) => {
       if (e.code === "rate_limited") {
         toast.error(`Troppe analisi in poco tempo: riprova tra ${e.retryAfterSec ?? 60} secondi.`);
@@ -301,6 +276,28 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
       toast.error(`Analisi non completata: ${e.message}${extra ? ` — ${extra}` : ""}`);
     },
   });
+
+  // `lastJob` racconta come è finito il lavoro accodato, ma il server lo consuma
+  // alla prima GET che lo legge: qui si tiene traccia SOLO della transizione
+  // "era in corso, adesso non più" (in questa scheda), altrimenti un mount con
+  // `pending: false` già in cache mostrerebbe un toast per un lavoro mai visto
+  // partire da qui.
+  const wasPending = useRef(false);
+  useEffect(() => {
+    const lastJob = state.data?.lastJob;
+    if (wasPending.current && !pending && lastJob) {
+      if (lastJob.status === "done") {
+        toast.success(`Analisi completata in ${Math.round(lastJob.durationMs / 1000)} secondi.`);
+        // La lista degli strumenti mostra il verdetto: va rinfrescata.
+        queryClient.invalidateQueries({ queryKey: ["instruments", "list"] });
+      } else {
+        const details = lastJob.error.details as { hint?: string; upstream?: string } | null;
+        const extra = details?.hint || details?.upstream;
+        toast.error(`Analisi non completata: ${lastJob.error.message}${extra ? ` — ${extra}` : ""}`);
+      }
+    }
+    wasPending.current = pending;
+  }, [pending, state.data?.lastJob, queryClient, toast]);
 
   if (state.isPending) {
     return (
@@ -328,14 +325,20 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
             type="button"
             className={latest ? "btn" : "btn btn--primary"}
             onClick={() => run.mutate()}
-            disabled={!configured || run.isPending}
+            disabled={!configured || run.isPending || pending}
             title={
               configured
                 ? "Genera una nuova analisi: è una chiamata a pagamento e richiede fino a un minuto"
                 : "Analisi non configurata su questo ambiente"
             }
           >
-            {run.isPending ? <Spinner inline label="Analisi in corso…" /> : latest ? "Rigenera" : "Analizza con Claude"}
+            {run.isPending || pending ? (
+              <Spinner inline label="Analisi in corso…" />
+            ) : latest ? (
+              "Rigenera"
+            ) : (
+              "Analizza con Claude"
+            )}
           </button>
         </div>
       </div>
@@ -361,17 +364,18 @@ export default function InstrumentAnalysis({ instrument }: { instrument: Instrum
         </div>
       ) : null}
 
-      {run.isPending ? (
+      {pending ? (
         <p className="form-note">
           Sto leggendo bilancio, storico prezzi e la tua posizione, poi ragiono sui dati: servono
-          diverse decine di secondi. Puoi lasciare la pagina aperta.
+          diverse decine di secondi. Puoi lasciare la pagina aperta, o anche chiuderla: quando torni,
+          l'analisi è lì.
         </p>
       ) : null}
 
       {latest ? (
         <AnalysisBody analysis={latest} instrument={instrument} />
       ) : (
-        !run.isPending && configured && (
+        !pending && configured && (
           <EmptyState
             title="Nessuna analisi per questo strumento"
             message={`${pitch} Ogni analisi è una chiamata a pagamento: si genera quando la chiedi, non automaticamente.`}

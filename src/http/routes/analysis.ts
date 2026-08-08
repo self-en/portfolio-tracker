@@ -30,7 +30,7 @@ import { contextGaps } from "../../ai/prompt";
 import { AiError, isConfigured } from "../../ai/client";
 import { loadValuation, today } from "./portfolio";
 import * as S from "../serialize";
-import { err, notFound } from "../errors";
+import { err, notFound, conflict } from "../errors";
 import { z, params, query, idParam } from "../validate";
 import { createLimiter } from "../rateLimit";
 import { errMessage } from "../../util/err";
@@ -260,13 +260,47 @@ const analysisLimiter = createLimiter({
   name: "instrument-analysis",
 });
 
-/** Un AiError porta già il codice giusto: qui si traduce nella forma d'errore API. */
-function rethrow(e: unknown): never {
+/**
+ * Stato in memoria dell'analisi in corso, per strumento.
+ *
+ * PERCHÉ IN BACKGROUND E NON DENTRO LA RICHIESTA HTTP: con `effort: high` e
+ * thinking adattivo Claude impiega da alcune decine di secondi fino ai 180s del
+ * timeout in `client.ts`. Un gateway o un proxy davanti all'app chiude la
+ * connessione ben prima di quel limite — è quello che è successo in produzione:
+ * il backend finiva e SALVAVA l'analisi, ma il browser aveva già mostrato un
+ * errore generico perché il salto di rete in mezzo aveva un timeout più corto
+ * del nostro, che l'app non controlla. La POST ora accoda il lavoro e torna
+ * subito; la pagina fa polling della GET (`pending`, `lastJob`) finché non
+ * finisce — lo stesso schema di `/market/refresh` con la sua coda.
+ *
+ * In memoria e non in una tabella: un solo replica (vedi rateLimit.ts), e un
+ * job perso per un riavvio a metà non è un regresso — l'analisi sincrona di
+ * prima sarebbe stata persa nello stesso modo da un riavvio a metà richiesta.
+ */
+interface AnalysisJobError {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+interface AnalysisJob {
+  status: "running" | "done" | "error";
+  startedAt: number;
+  durationMs?: number;
+  error?: AnalysisJobError;
+}
+const jobs = new Map<number, AnalysisJob>();
+
+/** Un errore già tipizzato (AiError o l'ApiError di un salvataggio fallito) nella forma che il job conserva. */
+function toJobError(e: unknown): AnalysisJobError {
   if (e instanceof AiError || (e as { name?: string })?.name === "AiError") {
     const ai = e as AiError;
-    throw err(ai.code, ai.message, ai.details);
+    return { code: ai.code, message: ai.message, details: ai.details };
   }
-  throw e;
+  const apiErr = e as { name?: string; code?: string; message?: string; details?: unknown };
+  if (apiErr?.name === "ApiError" && apiErr.code) {
+    return { code: apiErr.code, message: apiErr.message || "errore interno", details: apiErr.details };
+  }
+  return { code: "internal_error", message: "errore interno" };
 }
 
 const router: FastifyPluginAsync = async (app) => {
@@ -288,11 +322,33 @@ const router: FastifyPluginAsync = async (app) => {
       // prima è `latest`.
       const list = await analysesRepo.history(inst.id, req.valid.query.history ?? 5);
 
+      // `lastJob` è consumato UNA VOLTA SOLA: è il modo in cui questa risposta dice
+      // alla pagina "quello che avevi accodato è appena finito, ecco come". Letto,
+      // si cancella — altrimenti un refresh successivo (o un'altra scheda) rivedrebbe
+      // lo stesso esito e mostrerebbe di nuovo il toast di completamento/errore.
+      // `latest` sopra è già la verità: non serve ripeterla qui per essere corretti.
+      const job = jobs.get(inst.id);
+      const pending = job?.status === "running";
+      let lastJob: { status: "done"; durationMs: number } | { status: "error"; error: AnalysisJobError } | null =
+        null;
+      if (job && job.status !== "running") {
+        lastJob =
+          job.status === "done"
+            ? { status: "done", durationMs: job.durationMs ?? 0 }
+            : { status: "error", error: job.error as AnalysisJobError };
+        jobs.delete(inst.id);
+      }
+
       return reply.send({
         instrumentId: inst.id,
         // La UI non deve indovinare perché il pulsante è spento: glielo diciamo.
         configured: isConfigured(),
         model: config.ai.model,
+        // Un'analisi in corso ADESSO, avviata da questa o da un'altra scheda: la UI
+        // disabilita il pulsante e mostra lo spinner senza doverlo tenere in uno
+        // stato locale che un refresh della pagina perderebbe.
+        pending,
+        lastJob,
         latest: list[0] ? serialize(list[0]) : null,
         previous: list.slice(1).map(serializeBrief),
         disclaimer:
@@ -316,6 +372,13 @@ const router: FastifyPluginAsync = async (app) => {
         });
       }
 
+      // Un'analisi per questo strumento è già in coda o in corso: non ne accoda una
+      // seconda (doppio click, due schede) e non brucia una quota sulla bolletta per
+      // un rifiuto gratuito — per questo il controllo precede `hit()`.
+      if (jobs.get(inst.id)?.status === "running") {
+        throw conflict("un'analisi per questo strumento è già in corso: aspetta che finisca");
+      }
+
       // Il limite si consuma QUI e non in un preHandler: un id inesistente (404),
       // un id malformato (422) o il token mancante (503) non costano niente, e
       // bruciare per loro una delle 20 analisi/ora punirebbe l'utente per un errore
@@ -334,6 +397,10 @@ const router: FastifyPluginAsync = async (app) => {
         });
       }
 
+      // I fondamentali servono ADESSO per costruire il prompt (è la terza eccezione
+      // alla regola sul provider, vedi in testa al file): questa parte resta dentro
+      // la richiesta perché è rapida. Solo la chiamata al modello — quella che può
+      // durare minuti — va in background.
       const context = await buildContext(inst);
       logger.info(
         {
@@ -346,59 +413,70 @@ const router: FastifyPluginAsync = async (app) => {
         "[analysis] contesto pronto, chiamo il modello"
       );
 
-      let result;
-      try {
-        result = await analyzeInstrument(context);
-      } catch (e) {
-        rethrow(e);
-      }
+      const startedAt = Date.now();
+      jobs.set(inst.id, { status: "running", startedAt });
 
-      let saved;
-      try {
-        saved = await analysesRepo.create({
-          instrumentId: inst.id,
-          model: result.model,
-          effort: result.effort,
-          verdict: result.verdict,
-          confidence: result.confidence,
-          headline: result.headline,
-          analysis: result.analysis,
-          // Lo snapshot completo, lacune comprese: è ciò che rende il verdetto
-          // rileggibile quando i prezzi e il bilancio saranno cambiati. Il cast è
-          // dovuto: `context` è una forma dichiarata, la colonna è un JSONB generico.
-          context: context as unknown as Record<string, unknown>,
-          usage: result.usage,
-        });
-      } catch (e) {
-        // L'analisi è GIÀ STATA PAGATA e a questo punto esiste solo in memoria: se
-        // il salvataggio non riesce (pool caduto, vincolo violato) l'unico modo di
-        // non buttarla è metterla nei log. Verboso di proposito — è il contenuto
-        // completo, non un riassunto.
-        logger.error(
-          {
+      // Fire-and-forget: la richiesta HTTP torna subito, il lavoro vero continua qui.
+      // Nessun `await` di questa promise nell'handler — è esattamente il punto.
+      void (async () => {
+        let result;
+        try {
+          result = await analyzeInstrument(context);
+        } catch (e) {
+          jobs.set(inst.id, { status: "error", startedAt, error: toJobError(e) });
+          return;
+        }
+
+        try {
+          const saved = await analysesRepo.create({
             instrumentId: inst.id,
-            err: errMessage(e),
+            model: result.model,
+            effort: result.effort,
             verdict: result.verdict,
             confidence: result.confidence,
             headline: result.headline,
             analysis: result.analysis,
+            // Lo snapshot completo, lacune comprese: è ciò che rende il verdetto
+            // rileggibile quando i prezzi e il bilancio saranno cambiati. Il cast è
+            // dovuto: `context` è una forma dichiarata, la colonna è un JSONB generico.
+            context: context as unknown as Record<string, unknown>,
             usage: result.usage,
-          },
-          "[analysis] analisi generata e PAGATA ma NON salvata: il contenuto è in questo record"
-        );
-        throw e;
-      }
-      if (!saved) throw err("internal_error", "analisi generata ma non salvata");
+          });
+          if (!saved) throw err("internal_error", "analisi generata ma non salvata");
+          jobs.set(inst.id, { status: "done", startedAt, durationMs: result.durationMs });
+        } catch (e) {
+          // L'analisi è GIÀ STATA PAGATA e a questo punto esiste solo in memoria: se
+          // il salvataggio non riesce (pool caduto, vincolo violato) l'unico modo di
+          // non buttarla è metterla nei log. Verboso di proposito — è il contenuto
+          // completo, non un riassunto.
+          logger.error(
+            {
+              instrumentId: inst.id,
+              err: errMessage(e),
+              verdict: result.verdict,
+              confidence: result.confidence,
+              headline: result.headline,
+              analysis: result.analysis,
+              usage: result.usage,
+            },
+            "[analysis] analisi generata e PAGATA ma NON salvata: il contenuto è in questo record"
+          );
+          jobs.set(inst.id, { status: "error", startedAt, error: toJobError(e) });
+        }
+      })();
 
-      // 201: la risorsa è stata creata. La UI la mostra subito, non c'è nulla da
-      // accodare — a differenza di /refresh, qui il lavoro è già finito.
-      return reply.code(201).send({
-        instrumentId: inst.id,
-        analysis: serialize(saved),
-        durationMs: result.durationMs,
-      });
+      // 202: accodato, non eseguito — la pagina scopre l'esito facendo polling della
+      // GET (`pending`, `lastJob`), esattamente come /market/refresh con /market/status.
+      return reply.code(202).send({ instrumentId: inst.id, status: "running" as const });
     }
   );
 };
 
-export { router, buildContext, serialize as _serialize, RISK_YEARS, analysisLimiter as _analysisLimiter };
+export {
+  router,
+  buildContext,
+  serialize as _serialize,
+  RISK_YEARS,
+  analysisLimiter as _analysisLimiter,
+  jobs as _jobs,
+};

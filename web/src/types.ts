@@ -236,22 +236,39 @@ export interface InstrumentAnalysisBrief {
   model: string;
 }
 
+/**
+ * L'esito dell'ULTIMA analisi accodata da una POST, consumato una volta sola dal
+ * server: dopo che la GET lo ha restituito una volta, torna `null` anche se la
+ * stessa POST ha già prodotto un risultato (che resta in `latest`, quello non si
+ * perde). Serve solo a far scattare il toast di completamento/errore.
+ */
+export type AnalysisJobResult =
+  | { status: "done"; durationMs: number }
+  | { status: "error"; error: { code: string; message: string; details?: unknown } };
+
 /** GET /api/instruments/:id/analysis. */
 export interface AnalysisResponse {
   instrumentId: number;
   /** false quando CLAUDE_CODE_OAUTH_TOKEN non è impostato: la UI spiega invece di fallire. */
   configured: boolean;
   model: string;
+  /** Un'analisi per questo strumento è in corso ADESSO — avviata da questa pagina o da un'altra scheda. */
+  pending: boolean;
+  lastJob: AnalysisJobResult | null;
   latest: InstrumentAnalysis | null;
   previous: InstrumentAnalysisBrief[];
   disclaimer: string;
 }
 
-/** POST /api/instruments/:id/analysis. */
-export interface AnalysisCreatedResponse {
+/**
+ * POST /api/instruments/:id/analysis: 202, il lavoro è accodato non eseguito.
+ * Il risultato arriva dal polling di `AnalysisResponse.pending` /`.lastJob`, non
+ * da questa risposta — la chiamata a Claude dura troppo per stare in una singola
+ * richiesta HTTP (vedi il commento in src/http/routes/analysis.ts).
+ */
+export interface AnalysisStartedResponse {
   instrumentId: number;
-  analysis: InstrumentAnalysis;
-  durationMs: number;
+  status: "running";
 }
 
 // ---------------------------------------------------------------------------
