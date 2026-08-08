@@ -880,43 +880,48 @@ function PreviewPanel({
               contiene già: usala per confrontare, non come saldo finale.
             </p>
           ) : null}
-          <table className="table table--compact">
-            <thead>
-              <tr>
-                <th scope="col" />
-                <th scope="col" className="cell-right">
-                  Prima
-                </th>
-                <th scope="col" className="cell-right">
-                  Dopo
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Quantità</th>
-                <td className="cell-right num">{fmtQty(pos.quantityBefore)}</td>
-                <td className="cell-right num">{fmtQty(pos.quantityAfter)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Costo di carico</th>
-                <td className="cell-right">{money(pos.costBasisBefore, ccy)}</td>
-                <td className="cell-right">{money(pos.costBasisAfter, ccy)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Costo medio dopo</th>
-                <td className="cell-right muted">{DASH}</td>
-                <td className="cell-right">{money(pos.avgCostAfter, ccy)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Plusvalenza realizzata</th>
-                <td className="cell-right muted">{DASH}</td>
-                <td className="cell-right">
-                  <Money value={pos.realizedPnlDelta} ccy={ccy} withSign tone />
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {/* `table--matrix`: questa tabella è un confronto PRIMA/DOPO, e impilarla
+              in schede distruggerebbe il confronto. È l'unica che si sfila dalla
+              trasformazione mobile e scorre di lato nel suo contenitore. */}
+          <div className="table-scroll">
+            <table className="table table--compact table--matrix">
+              <thead>
+                <tr>
+                  <th scope="col" />
+                  <th scope="col" className="cell-right">
+                    Prima
+                  </th>
+                  <th scope="col" className="cell-right">
+                    Dopo
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Quantità</th>
+                  <td className="cell-right num">{fmtQty(pos.quantityBefore)}</td>
+                  <td className="cell-right num">{fmtQty(pos.quantityAfter)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Costo di carico</th>
+                  <td className="cell-right">{money(pos.costBasisBefore, ccy)}</td>
+                  <td className="cell-right">{money(pos.costBasisAfter, ccy)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Costo medio dopo</th>
+                  <td className="cell-right muted">{DASH}</td>
+                  <td className="cell-right">{money(pos.avgCostAfter, ccy)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Plusvalenza realizzata</th>
+                  <td className="cell-right muted">{DASH}</td>
+                  <td className="cell-right">
+                    <Money value={pos.realizedPnlDelta} ccy={ccy} withSign tone />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <p className="muted small">
             Plusvalenza realizzata, redditi e plusvalenza latente restano voci separate: non
             vengono mai sommate in un unico profitto. Questa app non fornisce consulenza fiscale.

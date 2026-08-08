@@ -1,12 +1,13 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, useRef } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { money, monthLabel, num } from "../format";
 import ChartFrame from "./ChartFrame";
 import ChartTooltip, { pointOf } from "./ChartTooltip";
 import ColumnShape from "./ColumnShape";
 import useChartTheme from "./useChartTheme";
+import useElementWidth from "./useElementWidth";
 import { hatch45 } from "./chartTheme";
-import { toNumberOrZero } from "./numbers";
+import { compactTick, toNumberOrZero } from "./numbers";
 import type { TooltipRenderProps, TooltipRow } from "./ChartTooltip";
 import type { LegendItems } from "./ChartLegend";
 import type { MonthlyIncomeTotal } from "../types";
@@ -48,6 +49,12 @@ export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching 
   const theme = useChartTheme();
   const hatchId = `${safe(useId())}-income-projected`;
   const hatch = hatch45(hatchId, theme.sequential);
+
+  // Come in ValueSeriesChart: la larghezza misurata del plot, non un breakpoint.
+  // A 0 (primo render) valgono i numeri desktop, così non c'è salto di layout.
+  const plotRef = useRef<HTMLDivElement>(null);
+  const plotWidth = useElementWidth(plotRef);
+  const narrow = plotWidth > 0 && plotWidth < 480;
 
   const data = useMemo<IncomeColumn[]>(
     () =>
@@ -126,12 +133,20 @@ export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching 
           </tr>
         </thead>
         <tbody>
+          {/* data-label ripete l'intestazione: sotto i 640px la riga diventa una
+              scheda e senza di esso resterebbe una colonna di numeri anonimi. */}
           {data.map((d) => (
             <tr key={d.month}>
-              <td>{monthLabel(d.month)}</td>
-              <td className="num">{money(d.raw.confirmed, baseCcy)}</td>
-              <td className="num">{money(d.raw.projected, baseCcy)}</td>
-              <td className="num">{money(d.raw.gross, baseCcy)}</td>
+              <td data-label="Mese">{monthLabel(d.month)}</td>
+              <td className="num" data-label="Incassato">
+                {money(d.raw.confirmed, baseCcy)}
+              </td>
+              <td className="num" data-label="Proiettato">
+                {money(d.raw.projected, baseCcy)}
+              </td>
+              <td className="num" data-label="Totale lordo">
+                {money(d.raw.gross, baseCcy)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -150,67 +165,74 @@ export default function IncomeByMonthChart({ items, baseCcy = "EUR", refetching 
       note="Gli importi sono LORDI: la ritenuta si registra alla conferma dell'incasso."
       table={table}
     >
-      <ResponsiveContainer width="100%" height={260}>
-        <BarChart
-          data={data}
-          margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-          // Colonne spesse al massimo 24px: la banda che resta è aria, non si
-          // riempie.
-          maxBarSize={theme.marks.barMaxThickness}
-          barCategoryGap="22%"
-        >
-          <defs>
-            <pattern {...hatch.patternProps}>
-              <rect {...hatch.backgroundProps} />
-              <path {...hatch.pathProps} />
-            </pattern>
-          </defs>
+      <div ref={plotRef}>
+        <ResponsiveContainer width="100%" height={narrow ? 190 : 260}>
+          <BarChart
+            data={data}
+            margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+            // Colonne spesse al massimo 24px: la banda che resta è aria, non si
+            // riempie.
+            maxBarSize={theme.marks.barMaxThickness}
+            barCategoryGap="22%"
+          >
+            <defs>
+              <pattern {...hatch.patternProps}>
+                <rect {...hatch.backgroundProps} />
+                <path {...hatch.pathProps} />
+              </pattern>
+            </defs>
 
-          <CartesianGrid
-            stroke={theme.grid}
-            strokeWidth={theme.marks.gridWidth}
-            vertical={false}
-          />
-          <XAxis
-            dataKey="month"
-            tickFormatter={monthLabel}
-            stroke={theme.axis}
-            strokeWidth={theme.marks.gridWidth}
-            tick={{ fill: theme.textMuted, fontSize: 11 }}
-            tickLine={false}
-            minTickGap={8}
-            interval="preserveStartEnd"
-          />
-          {/* Un solo asse y, senza identificatore d'asse: mai una seconda scala. */}
-          <YAxis
-            tickFormatter={(v) => num(v, 0)}
-            stroke={theme.axis}
-            strokeWidth={theme.marks.gridWidth}
-            tick={{ fill: theme.textMuted, fontSize: 11 }}
-            tickLine={false}
-            width={58}
-          />
-          {/* Su barre e colonne la MARCA è il bersaglio: niente crosshair. */}
-          <Tooltip content={tooltip} cursor={false} isAnimationActive={false} />
+            <CartesianGrid
+              stroke={theme.grid}
+              strokeWidth={theme.marks.gridWidth}
+              vertical={false}
+            />
+            <XAxis
+              dataKey="month"
+              tickFormatter={monthLabel}
+              stroke={theme.axis}
+              strokeWidth={theme.marks.gridWidth}
+              tick={{ fill: theme.textMuted, fontSize: 11 }}
+              tickLine={false}
+              // 44 come in ValueSeriesChart: con 8 le dodici etichette "gen 2025" si
+              // sovrapponevano in 270px, e con preserveStartEnd recharts ne salta
+              // quante serve invece di stamparle addosso l'una all'altra.
+              minTickGap={44}
+              interval="preserveStartEnd"
+            />
+            {/* Un solo asse y, senza identificatore d'asse: mai una seconda scala. */}
+            <YAxis
+              // Vedi ValueSeriesChart: asse a 40px e tick compatti sui plot stretti,
+              // fontSize invariato.
+              tickFormatter={narrow ? compactTick : (v) => num(v, 0)}
+              stroke={theme.axis}
+              strokeWidth={theme.marks.gridWidth}
+              tick={{ fill: theme.textMuted, fontSize: 11 }}
+              tickLine={false}
+              width={narrow ? 40 : 58}
+            />
+            {/* Su barre e colonne la MARCA è il bersaglio: niente crosshair. */}
+            <Tooltip content={tooltip} cursor={false} isAnimationActive={false} />
 
-          <Bar
-            dataKey="confirmedValue"
-            stackId="income"
-            fill={theme.sequential}
-            shape={<ColumnShape segment="confirmed" />}
-            activeBar={<ColumnShape segment="confirmed" fillOpacity={0.82} />}
-            isAnimationActive={false}
-          />
-          <Bar
-            dataKey="projectedValue"
-            stackId="income"
-            fill={hatch.fill}
-            shape={<ColumnShape segment="projected" />}
-            activeBar={<ColumnShape segment="projected" fillOpacity={0.82} />}
-            isAnimationActive={false}
-          />
-        </BarChart>
-      </ResponsiveContainer>
+            <Bar
+              dataKey="confirmedValue"
+              stackId="income"
+              fill={theme.sequential}
+              shape={<ColumnShape segment="confirmed" />}
+              activeBar={<ColumnShape segment="confirmed" fillOpacity={0.82} />}
+              isAnimationActive={false}
+            />
+            <Bar
+              dataKey="projectedValue"
+              stackId="income"
+              fill={hatch.fill}
+              shape={<ColumnShape segment="projected" />}
+              activeBar={<ColumnShape segment="projected" fillOpacity={0.82} />}
+              isAnimationActive={false}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </ChartFrame>
   );
 }

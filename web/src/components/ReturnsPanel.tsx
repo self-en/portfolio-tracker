@@ -69,11 +69,15 @@ export default function ReturnsPanel({ returns, disclaimer }: ReturnsPanelProps)
             <tbody>
               {byYear.map((y) => (
                 <tr key={y.year}>
-                  <th scope="row" style={{ fontWeight: 500 }}>{y.year}</th>
-                  <td className={`num ${toneOf(y.twr)}`}>
+                  {/* data-label su ogni cella: sotto i 640px la riga diventa una
+                      scheda e senza etichette resterebbero due numeri anonimi. */}
+                  <th scope="row" className="cell-rowhead" data-label="Anno">
+                    {y.year}
+                  </th>
+                  <td className={`num ${toneOf(y.twr)}`} data-label="TWR">
                     {y.twr == null ? DASH : signedPct(y.twr)}
                   </td>
-                  <td className={`num ${toneOf(y.xirr)}`}>
+                  <td className={`num ${toneOf(y.xirr)}`} data-label="XIRR">
                     {y.xirr == null ? DASH : signedPct(y.xirr)}
                   </td>
                 </tr>

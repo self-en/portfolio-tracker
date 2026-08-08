@@ -2,8 +2,14 @@
 <html lang="it">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover: senza, env(safe-area-inset-*) vale zero e il contenuto
+         resterebbe comunque dentro le barre nere del notch invece di usarle. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <!-- La chrome del browser prende il colore della superficie del tema attivo:
+         una barra bianca sopra un'app scura è la giuntura che si nota di più. -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141a22" media="(prefers-color-scheme: dark)" />
     <title>Portfolio Tracker</title>
   </head>
   <body>

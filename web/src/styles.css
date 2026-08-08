@@ -33,6 +33,10 @@
   --radius-sm: 5px;
   --gap: 1rem;
   --page-max: 1440px;
+  /* Altezza della topbar sticky. Serve a chi deve scostarsi da sotto di essa
+     (scroll-margin-top dei mesi dell'agenda): un numero hardcoded in un altro
+     foglio smette di essere vero appena la barra cambia altezza. */
+  --topbar-h: 3.5rem;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 8px rgb(16 24 40 / 4%);
 
   color-scheme: light;
@@ -113,6 +117,12 @@ body,
   min-height: 100%;
 }
 
+html {
+  /* iOS gonfia il testo di suo quando il telefono ruota in orizzontale: qui la
+     tipografia è già scelta, e ingrandirla sballa ogni larghezza calcolata. */
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   background: var(--surface-sunken);
@@ -190,7 +200,11 @@ a {
 .app {
   display: flex;
   flex-direction: column;
+  /* Sui browser mobili 100vh è più alto del viewport VISIBILE (le barre dinamiche
+     non sono contate): il fondo della pagina finisce sotto la chrome. La riga
+     100vh viene prima ed è il fallback per chi non conosce dvh. */
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .page {
@@ -203,7 +217,10 @@ a {
 .page--centered {
   display: grid;
   place-items: center;
+  /* Come .app: è la pagina del login, e con 100vh il riquadro risulta centrato
+     rispetto a un'altezza che sul telefono non si vede tutta. */
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .topbar {
@@ -250,9 +267,14 @@ a {
   white-space: nowrap;
 }
 
-.nav-link:hover {
-  background: var(--surface-inset);
-  color: var(--text);
+/* Ogni :hover sta dietro a (hover: hover): su un touchscreen lo stato si applica
+   al tap e ci RESTA fino al tocco successivo, facendo sembrare attivo un elemento
+   che non lo è. */
+@media (hover: hover) {
+  .nav-link:hover {
+    background: var(--surface-inset);
+    color: var(--text);
+  }
 }
 
 .nav-link--active {
@@ -372,8 +394,10 @@ a {
   cursor: pointer;
 }
 
-.btn:hover:not(:disabled) {
-  background: var(--surface-inset);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    background: var(--surface-inset);
+  }
 }
 
 .btn:disabled {
@@ -387,9 +411,11 @@ a {
   color: var(--accent-text);
 }
 
-.btn--primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  background: var(--accent);
+@media (hover: hover) {
+  .btn--primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: var(--accent);
+  }
 }
 
 .btn--ghost {
@@ -590,25 +616,13 @@ a {
 @media (max-width: 640px) {
   :root {
     --gap: 0.75rem;
+    /* La topbar è più alta: il panino è un bersaglio da 44px. */
+    --topbar-h: 4.25rem;
   }
 
-  .topbar-inner {
-    flex-wrap: wrap;
-    row-gap: 0.5rem;
-  }
-
-  .nav {
-    order: 3;
-    flex-basis: 100%;
-  }
-
-  .topbar-tools {
-    margin-left: auto;
-  }
-
-  .select-wrap .select {
-    max-width: 8.5rem;
-  }
+  /* La topbar che andava a capo e la .nav su una seconda riga sticky sono state
+     sostituite dal menu a panino: le regole stanno nella sezione "mobile" in fondo,
+     insieme al resto del pannello. */
 
   .grid {
     grid-template-columns: 1fr;
@@ -971,12 +985,24 @@ a {
   border-top: 1px solid var(--border);
 }
 
+/* Modale SCORREVOLE, come già fa .pt-dialog in charts.css — i due sistemi di
+   dialogo erano incoerenti. Centrare con top/left + transform dentro un contenitore
+   fisso, senza max-height né overflow, mandava i bottoni fuori dal contenitore su
+   uno schermo basso (o con la tastiera aperta): irraggiungibili e non scorrevoli. */
+.modal-root {
+  display: grid;
+  place-items: center;
+  padding: var(--gap);
+  overflow-y: auto;
+}
+
 .modal {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(32rem, calc(100vw - 2rem));
+  position: static;
+  transform: none;
+  width: min(32rem, 100%);
+  max-height: calc(100vh - 2 * var(--gap));
+  max-height: calc(100dvh - 2 * var(--gap));
+  overflow-y: auto;
 }
 
 .modal-title {
@@ -1031,8 +1057,10 @@ a {
   cursor: pointer;
 }
 
-.search-result:hover {
-  background: var(--surface-inset);
+@media (hover: hover) {
+  .search-result:hover {
+    background: var(--surface-inset);
+  }
 }
 
 .search-symbol {
@@ -1156,6 +1184,7 @@ section.card {
 
   .table,
   .table tbody,
+  .table tfoot,
   .table tr,
   .table td {
     display: block;
@@ -1167,24 +1196,62 @@ section.card {
     border-bottom: 1px solid var(--border-strong);
   }
 
-  .table td {
+  /* Anche i th di RIGA (<th scope="row">): restavano table-cell dentro un tr
+     diventato block, e con la position: sticky delle intestazioni addosso. È la
+     cella che identifica la riga, quindi era proprio quella a mancare. */
+  .table td,
+  .table tbody th {
     display: flex;
     justify-content: space-between;
+    /* Una cella può avere più figli (valore + sottotitolo + badge): senza wrap
+       finiscono affiancati su una riga che non ci sta. */
+    flex-wrap: wrap;
     gap: var(--gap);
     border: 0;
     padding: 0.2rem 0.6rem;
     text-align: right;
+    /* Il nowrap delle celle è ciò che, in modalità schede, fa scorrere di lato la
+       pagina sui nomi di strumento lunghi. */
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
-  .table td::before {
+  .table tbody th {
+    position: static;
+    background: none;
+  }
+
+  .table td::before,
+  .table tbody th::before {
     content: attr(data-label);
     color: var(--text-muted);
     font-size: 0.8rem;
     text-align: left;
   }
 
+  /* La cella che identifica la riga è il TITOLO della scheda: porta il nome, i
+     badge e il sottotitolo con ticker/ISIN, cioè più figli, e affiancarli a
+     un'etichetta li spezzerebbe. In blocco l'etichetta sta sopra e il resto sotto,
+     come si legge una scheda. */
+  .table tbody th.cell-rowhead {
+    display: block;
+    text-align: left;
+    padding: 0.35rem 0.6rem 0.1rem;
+  }
+
+  .table tbody th.cell-rowhead::before {
+    display: block;
+  }
+
   .table td.cell-optional {
     display: none;
+  }
+
+  /* La colonna "Azioni" in fondo alla scheda: i bottoni si allineano a destra
+     invece di restare schiacciati accanto alla propria etichetta. */
+  .table td .row--tight {
+    flex: 1;
+    justify-content: flex-end;
   }
 
   .detail-row {
@@ -1192,8 +1259,14 @@ section.card {
     gap: 0;
   }
 
+  /* Il drawer diventa un foglio a tutta altezza: è la schermata dove si passa più
+     tempo (i form dei movimenti e degli strumenti), e mezza pagina dietro che si
+     intravede è solo rumore. */
   .drawer {
+    inset: 0;
     width: 100%;
+    height: 100vh;
+    height: 100dvh;
     border-left: 0;
   }
 }
@@ -1334,4 +1407,293 @@ a.badge--verdict-trim,
 a.badge--verdict-avoid,
 a.badge--verdict-more {
   text-decoration: none;
+}
+
+/* ============================================================================
+   Mobile — telefono in verticale da 320px
+   Aggiunte in fondo, e la posizione È la correzione: le regole qui sotto
+   sovrascrivono classi dichiarate più su (.grid--2, .modal, la topbar) e le media
+   query NON aggiungono specificità. Un blocco @media a metà file perde contro una
+   classe dichiarata dopo di esso — è esattamente il bug che rendeva inutilizzabile
+   il dettaglio strumento.
+   ========================================================================== */
+
+/* ---------- il bug di cascata di .grid--2 ----------
+   .grid--2 è definita fuori da ogni media query e DOPO il blocco 640px che
+   riporta .grid a una colonna: sul telefono sopravviveva la sua traccia minima di
+   20rem = 320px, e a 360px la pagina andava in overflow orizzontale. */
+@media (max-width: 640px) {
+  .grid,
+  .grid--2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- celle e tabelle ---------- */
+
+/* La cella che identifica una riga (<th scope="row">): il peso è quello del corpo,
+   non quello di un'intestazione di colonna. Era uno style inline, che la
+   trasformazione in schede non poteva raggiungere. */
+.table .cell-rowhead {
+  font-weight: 500;
+}
+
+/* Solo lo scroll orizzontale, senza la cornice di .table-wrap: la tabella
+   dell'anteprima sta già dentro un pannello che ha il suo bordo. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* ---------- menu a panino ---------- */
+.navmenu-toggle {
+  /* Sopra i 640px non esiste: la .nav orizzontale è quella di sempre. */
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.navmenu-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.navmenu-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+
+.navmenu-panel {
+  position: fixed;
+  /* Da sinistra, a tutta altezza: dvh e non vh perché con le barre dinamiche il
+     fondo del pannello (dove sta l'Esci) finirebbe sotto la chrome del browser. */
+  inset: 0 auto 0 0;
+  width: min(18rem, 82vw);
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+  overflow-y: auto;
+  /* Senza contain, lo swipe oltre il fondo del pannello trascina la pagina dietro. */
+  overscroll-behavior: contain;
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.navmenu-list {
+  display: grid;
+  gap: 0.25rem;
+}
+
+/* Il pannello esiste per il dito, quindi le voci sono da 44px anche quando il
+   browser dichiara un puntatore fine (emulazione da devtools). */
+.navmenu-list .nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.35rem 0.6rem;
+}
+
+.navmenu-foot {
+  margin-top: auto;
+  padding-top: var(--gap);
+  border-top: 1px solid var(--border);
+}
+
+.navmenu-foot .btn {
+  width: 100%;
+}
+
+/* ---------- notch e home indicator ----------
+   Serve viewport-fit=cover in index.html, altrimenti env() vale zero. max() e non
+   somma: sui telefoni senza notch il padding resta quello di prima. */
+@supports (padding: env(safe-area-inset-left)) {
+  .page,
+  .topbar-inner {
+    padding-left: max(var(--gap), env(safe-area-inset-left));
+    padding-right: max(var(--gap), env(safe-area-inset-right));
+  }
+
+  .toasts {
+    bottom: calc(var(--gap) + env(safe-area-inset-bottom));
+  }
+
+  .drawer-body {
+    padding-bottom: calc(var(--gap) + env(safe-area-inset-bottom));
+  }
+
+  .drawer-footer {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .navmenu-panel {
+    padding-left: max(var(--gap), env(safe-area-inset-left));
+    padding-bottom: calc(var(--gap) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- 320-640px ---------- */
+@media (max-width: 640px) {
+  /* IL FIX DECISIVO. 16px è la soglia sotto la quale Safari iOS zooma al focus di
+     un campo, e non ripristina lo zoom all'uscita: tutta l'app resta fuori scala,
+     login compreso, al primo tocco. Si alza solo il font dei CONTROLLI, non quello
+     del body, per non gonfiare la tipografia di tutte le schermate. */
+  .input,
+  .select {
+    font-size: 16px;
+  }
+
+  /* --- topbar su UNA riga: [☰] · portafoglio · periodo --- */
+  .brand,
+  .nav,
+  .topbar-logout {
+    display: none;
+  }
+
+  .navmenu-toggle {
+    display: flex;
+  }
+
+  /* I due select prendono lo spazio che resta e si stringono invece di sfondare:
+     con una larghezza fissa il solo cluster degli strumenti voleva ~338px contro i
+     336px utili a 360px. */
+  .topbar-tools {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .select-wrap {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .select-wrap .select {
+    width: 100%;
+    max-width: none;
+  }
+
+  /* --- intestazione di pagina e filtri --- */
+  /* L'azione primaria ("Nuovo movimento") a piena larghezza sotto il titolo. */
+  .page-head > .btn,
+  .page-head > .row {
+    width: 100%;
+  }
+
+  /* Tre controlli su una riga a 360px sono tre controlli inutilizzabili: uno per
+     riga, a piena larghezza. */
+  .filterbar-row > .field {
+    flex-basis: 100%;
+  }
+
+  /* --- azioni dei form e dei dialoghi --- */
+  /* column-reverse e non column: nel markup l'annulla viene prima, quindi la
+     primaria finisce in alto, dove il pollice arriva senza spostare la mano. */
+  .form-actions,
+  .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  /* Le azioni del form vivono in fondo al CORPO del drawer (nessuna pagina passa
+     un footer a Drawer): in un form come quello dei movimenti starebbero a
+     centinaia di px di scroll. Sticky al fondo restano sempre visibili. */
+  .drawer-body .form-actions {
+    position: sticky;
+    bottom: 0;
+    margin: var(--gap) calc(var(--gap) * -1) 0;
+    padding: 0.6rem var(--gap);
+    background: var(--surface-raised);
+    border-top: 1px solid var(--border);
+  }
+
+  /* --- tabella che non si può impilare --- */
+  /* .table--matrix si sfila dalla trasformazione in schede: l'anteprima
+     prima/dopo È un confronto fra due colonne, e impilarla lo distrugge. Scorre di
+     lato nel suo contenitore. Deve stare DOPO le regole che annulla. */
+  .table--matrix {
+    display: table;
+    width: 100%;
+  }
+
+  .table--matrix thead {
+    display: table-header-group;
+  }
+
+  .table--matrix tbody {
+    display: table-row-group;
+  }
+
+  .table--matrix tr {
+    display: table-row;
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  /* text-align e background sono ridichiarati perché le regole delle schede li
+     avevano cambiati: qui la tabella deve restare identica al desktop. */
+  .table--matrix td,
+  .table--matrix tbody th {
+    display: table-cell;
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .table--matrix td.cell-right {
+    text-align: right;
+  }
+
+  .table--matrix tbody th {
+    background: var(--surface-inset);
+  }
+
+  .table--matrix td::before,
+  .table--matrix tbody th::before {
+    content: none;
+  }
+}
+
+/* ---------- aree toccabili ----------
+   Su (pointer: coarse) e non su una larghezza: il vincolo è il DITO, non lo
+   schermo. Così il desktop resta compatto e il minimo vale anche sui tablet. */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+
+  /* È la classe di quasi tutte le azioni mobile: Esci, Chiudi del drawer, i preset
+     di periodo, Azzera filtri, Conferma incasso. A 31px non si prendono col dito. */
+  .btn--small {
+    min-height: 40px;
+    padding: 0.45rem 0.7rem;
+  }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  /* Un <button> nudo, senza padding: ~16px di bersaglio per chiudere un toast. */
+  .toast-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
