@@ -196,6 +196,8 @@ self-en.json             le variabili d'ambiente che l'app dichiara alla piattaf
 web/                     SPA Vite + React
 test/                    domain/ market/ repo/ http/ db/ ai/ + fixtures/
 docs/decisions.md        le convenzioni bloccate — leggilo prima di contribuire
+CLAUDE.md                guida per Claude: mappa + le regole che mordono. Ce n'e'
+                         una per cartella (src/, src/domain/, web/, test/, chart/)
 ```
 
 I test girano contro i sorgenti `.ts` (`node --import tsx --test`), quindi la rete
