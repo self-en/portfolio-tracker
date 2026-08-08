@@ -455,11 +455,13 @@
 }
 
 .pt-agenda-name {
+  display: block;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .pt-agenda-meta {
+  display: block;
   color: var(--text-muted);
   font-size: 0.8rem;
 }
