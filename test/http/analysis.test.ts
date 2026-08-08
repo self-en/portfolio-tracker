@@ -98,6 +98,30 @@ async function api<T = any>(path: string, opts: RequestInit = {}): Promise<{ sta
   return { status: res.status, body: body as T };
 }
 
+/**
+ * Aspetta che il job accodato per uno strumento finisca, facendo polling della GET
+ * come fa la SPA (`refetchInterval`). Il fake client risolve senza I/O reale, quindi
+ * qui bastano pochi giri: se dopo `tries` la GET dice ancora `pending`, qualcosa nel
+ * codice di produzione (o nel test) non fa avanzare il job, ed è meglio un errore
+ * chiaro che un timeout silenzioso di `node --test`.
+ */
+async function waitForJob(id: number, tries = 200): Promise<{ status: number; body: any }> {
+  for (let i = 0; i < tries; i += 1) {
+    const r = await api(`/api/instruments/${id}/analysis`);
+    if (!r.body.pending) return r;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`analisi ${id}: ancora pending dopo ${tries} tentativi`);
+}
+
+/** POST (202, accodata) seguita dal polling fino alla fine: la GET risultante porta `lastJob` e `latest`. */
+async function runAnalysis(id: number): Promise<{ status: number; body: any }> {
+  const started = await api(`/api/instruments/${id}/analysis`, { method: "POST" });
+  assert.equal(started.status, 202, JSON.stringify(started.body));
+  assert.equal(started.body.status, "running");
+  return waitForJob(id);
+}
+
 const ids: Record<string, number> = {};
 
 test("setup: app, strumenti, ledger e prezzi", async () => {
@@ -213,15 +237,15 @@ test("GET su uno strumento inesistente: 404", async () => {
 // Percorso completo, con il client finto
 // ---------------------------------------------------------------------------
 
-test("POST genera, valida e SALVA l'analisi", async () => {
+test("POST accoda, e il job finisce per validare e SALVARE l'analisi", async () => {
   config.ai.configured = true;
   aiClient._setClient(fakeClient(okReply()));
   captured = null;
 
-  const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "done", JSON.stringify(r.body));
 
-  const a = r.body.analysis;
+  const a = r.body.latest;
   assert.equal(a.verdict, "MANTENERE");
   assert.equal(a.confidence, "MEDIA");
   assert.equal(a.headline, ANALYSIS.headline);
@@ -279,8 +303,8 @@ test("GET restituisce l'ultima analisi; una seconda finisce nello storico", asyn
   // Una seconda analisi non sovrascrive la prima: confrontare due giudizi a
   // distanza di mesi è il dato più interessante che questa funzione produce.
   aiClient._setClient(fakeClient(okReply({ ...ANALYSIS, verdict: "RIDURRE", headline: "Peso eccessivo" })));
-  const created = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(created.status, 201);
+  const created = await runAnalysis(ids.eq);
+  assert.equal(created.body.lastJob?.status, "done", JSON.stringify(created.body));
 
   r = await api(`/api/instruments/${ids.eq}/analysis`);
   assert.equal(must(r.body.latest, "l'ultima analisi").verdict, "RIDURRE");
@@ -315,8 +339,8 @@ test("un bond a pricing manuale si analizza comunque, con lo scadenzario nel con
 
   aiClient._setClient(fakeClient(okReply({ ...ANALYSIS, verdict: "MANTENERE", valuation: { assessment: "NON_VALUTABILE", notes: [] } })));
   captured = null;
-  const r = await api(`/api/instruments/${ids.bond}/analysis`, { method: "POST" });
-  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const r = await runAnalysis(ids.bond);
+  assert.equal(r.body.lastJob?.status, "done", JSON.stringify(r.body));
 
   const p = must(captured, "i parametri catturati");
   assert.ok(p.system.includes("CLASSE: OBBLIGAZIONE"), "prompt dedicato alla classe");
@@ -350,8 +374,8 @@ test("i fondamentali del provider finiscono nel contesto e nelle basi dell'anali
   try {
     aiClient._setClient(fakeClient(okReply()));
     captured = null;
-    const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const r = await runAnalysis(ids.eq);
+    assert.equal(r.body.lastJob?.status, "done", JSON.stringify(r.body));
 
     const p = must(captured, "i parametri catturati");
     const json = JSON.parse(p.prompt.slice(p.prompt.indexOf("{")));
@@ -362,11 +386,11 @@ test("i fondamentali del provider finiscono nel contesto e nelle basi dell'anali
     assert.equal(json.fundamentals.analysts.recommendationKey, "buy");
 
     // E la lacuna "nessun fondamentale" NON compare più.
-    assert.equal(r.body.analysis.basis.fundamentalsAsOf, "2026-06-27");
-    assert.ok(!r.body.analysis.basis.gaps.some((g: string) => g.includes("nessun fondamentale")));
+    assert.equal(r.body.latest.basis.fundamentalsAsOf, "2026-06-27");
+    assert.ok(!r.body.latest.basis.gaps.some((g: string) => g.includes("nessun fondamentale")));
     // Resta invece dichiarato ciò che il provider non pubblica più.
     assert.ok(
-      r.body.analysis.basis.gaps.some((g: string) => g.includes("voce per voce")),
+      r.body.latest.basis.gaps.some((g: string) => g.includes("voce per voce")),
       "lo stato patrimoniale dettagliato non c'è, e va detto"
     );
   } finally {
@@ -404,15 +428,15 @@ test("la posizione viene cercata nel portafoglio che DETIENE il titolo, non nel 
 
   aiClient._setClient(fakeClient(okReply()));
   captured = null;
-  const created = await api(`/api/instruments/${soloNelSecondo}/analysis`, { method: "POST" });
-  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const created = await runAnalysis(soloNelSecondo);
+  assert.equal(created.body.lastJob?.status, "done", JSON.stringify(created.body));
 
   const p = must(captured, "i parametri catturati");
   const json = JSON.parse(p.prompt.slice(p.prompt.indexOf("{")));
   assert.equal(json.portfolio.name, "Secondario", "il portafoglio che detiene il titolo");
   assert.ok(json.position, "la posizione deve esserci");
   assert.equal(String(json.position.quantity).startsWith("10"), true);
-  assert.equal(created.body.analysis.basis.hadPosition, true);
+  assert.equal(created.body.latest.basis.hadPosition, true);
 });
 
 test("le opzioni della query confinano l'agente e vincolano l'output", () => {
@@ -457,16 +481,16 @@ test("lo sforzo configurato arriva alla query", () => {
 // Errori del modello: mai un 500, mai una scheda a metà
 // ---------------------------------------------------------------------------
 
-test("un rifiuto del modello diventa 502, non un crash sull'output vuoto", async () => {
+test("un rifiuto del modello finisce nel job come errore leggibile, non un crash sull'output vuoto", async () => {
   // `refusal` arriva con un risultato regolare e senza output strutturato: leggerlo
   // senza guardare stop_reason produrrebbe un errore illeggibile.
   aiClient._setClient(
     fakeClient(() => sdkResult({ stop_reason: "refusal", result: "" }))
   );
-  const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.equal(r.body.error.code, "upstream_error");
-  assert.match(r.body.error.message, /rifiutato/);
+  const r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.equal(r.body.lastJob.error.code, "upstream_error");
+  assert.match(r.body.lastJob.error.message, /rifiutato/);
 });
 
 test("un output non conforme allo schema NON viene salvato", async () => {
@@ -476,22 +500,22 @@ test("un output non conforme allo schema NON viene salvato", async () => {
   // Verdetto fuori lista: senza la validazione arriverebbe al CHECK constraint del
   // database, cioè a un 500 dopo aver già pagato la chiamata.
   aiClient._setClient(fakeClient(okReply({ ...ANALYSIS, verdict: "VENDERE SUBITO" })));
-  let r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.match(r.body.error.message, /formato previsto/);
+  let r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.match(r.body.lastJob.error.message, /formato previsto/);
 
   // JSON malformato nel ripiego testuale (nessun `structured_output`): stessa storia.
   aiClient._setClient(fakeClient(() => sdkResult({ result: "non sono JSON" })));
-  r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
+  r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
 
   // Risposta troncata: si dichiara invece di salvare una scheda mutila.
   aiClient._setClient(
     fakeClient(() => sdkResult({ stop_reason: "max_tokens", result: '{"headline":' }))
   );
-  r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.match(r.body.error.message, /troncata/);
+  r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.match(r.body.lastJob.error.message, /troncata/);
 
   // L'agente si ferma senza concludere: un sottotipo di errore dell'SDK, non
   // un'eccezione. Deve diventare un messaggio che spiega, non "Errore inatteso".
@@ -500,15 +524,15 @@ test("un output non conforme allo schema NON viene salvato", async () => {
       sdkResult({ subtype: "error_max_turns", is_error: true, errors: [], structured_output: undefined })
     )
   );
-  r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.match(r.body.error.message, /prima di concludere/);
+  r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.match(r.body.lastJob.error.message, /prima di concludere/);
 
   const after = await api(`/api/instruments/${ids.eq}/analysis`);
   assert.equal(must(after.body.latest, "l'ultima analisi").id, beforeId, "nessun salvataggio parziale");
 });
 
-test("un errore di rete verso il provider diventa 502 con un messaggio utile", async () => {
+test("un errore di rete verso il provider finisce nel job con un messaggio utile", async () => {
   aiClient._setClient(
     fakeClient(() => {
       const e: Error & { status?: number } = new Error("Too Many Requests");
@@ -516,16 +540,16 @@ test("un errore di rete verso il provider diventa 502 con un messaggio utile", a
       throw e;
     })
   );
-  const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.equal(r.body.error.code, "upstream_error");
-  assert.match(JSON.stringify(r.body.error.details), /limite di richieste/);
+  const r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.equal(r.body.lastJob.error.code, "upstream_error");
+  assert.match(JSON.stringify(r.body.lastJob.error.details), /limite di richieste/);
   // Sui 4xx il messaggio dell'upstream arriva in pagina: la causa è la NOSTRA
   // richiesta, e cercarla nei log di un'app a utente singolo è tempo perso.
-  assert.match(JSON.stringify(r.body.error.details), /Too Many Requests/);
+  assert.match(JSON.stringify(r.body.lastJob.error.details), /Too Many Requests/);
 });
 
-test("un AiError del trasporto conserva il suo messaggio, non diventa un generico", async () => {
+test("un AiError del trasporto conserva il suo messaggio nel job, non diventa un generico", async () => {
   // Il timeout dell'analisi nasce come AiError dentro il trasporto. Riavvolgerlo
   // nel catch generico lo sostituirebbe con "non ha risposto", cioè butterebbe via
   // l'unica cosa che dice all'utente cosa fare.
@@ -536,13 +560,13 @@ test("un AiError del trasporto conserva il suo messaggio, non diventa un generic
       });
     })
   );
-  const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.match(r.body.error.message, /tempo massimo/);
-  assert.match(JSON.stringify(r.body.error.details), /180000/);
+  const r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.match(r.body.lastJob.error.message, /tempo massimo/);
+  assert.match(JSON.stringify(r.body.lastJob.error.details), /180000/);
 });
 
-test("un 5xx del provider NON riporta il messaggio dell'upstream (sarebbe rumore)", async () => {
+test("un 5xx del provider NON riporta il messaggio dell'upstream nel job (sarebbe rumore)", async () => {
   aiClient._setClient(
     fakeClient(() => {
       const e: Error & { status?: number } = new Error("dettagli interni del provider");
@@ -550,9 +574,9 @@ test("un 5xx del provider NON riporta il messaggio dell'upstream (sarebbe rumore
       throw e;
     })
   );
-  const r = await api(`/api/instruments/${ids.eq}/analysis`, { method: "POST" });
-  assert.equal(r.status, 502);
-  assert.ok(!JSON.stringify(r.body.error.details).includes("dettagli interni"));
+  const r = await runAnalysis(ids.eq);
+  assert.equal(r.body.lastJob?.status, "error", JSON.stringify(r.body));
+  assert.ok(!JSON.stringify(r.body.lastJob.error.details).includes("dettagli interni"));
 });
 
 // ---------------------------------------------------------------------------
@@ -656,14 +680,68 @@ test("cancellare uno strumento cancella le sue analisi (e non viene bloccato da 
   const tempId = r.body.id;
 
   aiClient._setClient(fakeClient(okReply()));
-  const created = await api(`/api/instruments/${tempId}/analysis`, { method: "POST" });
-  assert.equal(created.status, 201);
+  const created = await runAnalysis(tempId);
+  assert.equal(created.body.lastJob?.status, "done", JSON.stringify(created.body));
 
   const del = await api(`/api/instruments/${tempId}`, { method: "DELETE" });
   assert.equal(del.status, 204, "nessun 409: le analisi non trattengono lo strumento");
 
   const gone = await api(`/api/instruments/${tempId}/analysis`);
   assert.equal(gone.status, 404);
+});
+
+// ---------------------------------------------------------------------------
+// Il contratto async: 202 subito, `pending` mentre gira, un job per volta,
+// `lastJob` consumato una sola volta
+// ---------------------------------------------------------------------------
+
+test("la POST torna 202 subito; la GET porta `pending` finché il job non finisce, e un doppio POST è un 409", async () => {
+  const r = await api("/api/instruments", {
+    method: "POST",
+    body: JSON.stringify({ assetClass: "ETF", name: "In sospeso", ticker: "WAIT.MI", currency: "EUR" }),
+  });
+  assert.equal(r.status, 201);
+  const id = r.body.id;
+
+  // Un client finto che NON risponde finché non si sbloccca a mano: è l'unico modo
+  // di osservare `pending: true` senza dipendere da un vero ritardo di rete.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  aiClient._setClient(async (input: any) => {
+    captured = input;
+    await gate;
+    return sdkResult({ structured_output: ANALYSIS, result: JSON.stringify(ANALYSIS) });
+  });
+
+  const started = await api(`/api/instruments/${id}/analysis`, { method: "POST" });
+  assert.equal(started.status, 202);
+  assert.deepEqual(started.body, { instrumentId: id, status: "running" });
+
+  // Bloccato a metà: la GET lo dice, e non c'è ancora nessun esito da consumare.
+  const mid = await api(`/api/instruments/${id}/analysis`);
+  assert.equal(mid.body.pending, true);
+  assert.equal(mid.body.lastJob, null);
+
+  // Una seconda POST mentre la prima gira non ne accoda una seconda (sarebbe una
+  // doppia chiamata a pagamento per un doppio click): 409, non 202.
+  const dup = await api(`/api/instruments/${id}/analysis`, { method: "POST" });
+  assert.equal(dup.status, 409);
+  assert.equal(dup.body.error.code, "conflict");
+
+  release();
+  const done = await waitForJob(id);
+  assert.equal(done.body.pending, false);
+  assert.equal(done.body.lastJob?.status, "done");
+  assert.ok((done.body.lastJob as any).durationMs >= 0);
+  assert.equal(must(done.body.latest, "l'analisi salvata dal job").verdict, ANALYSIS.verdict);
+
+  // `lastJob` è consumato: una GET successiva non lo rivede, ma `latest` resta.
+  const again = await api(`/api/instruments/${id}/analysis`);
+  assert.equal(again.body.lastJob, null);
+  assert.equal(again.body.pending, false);
+  assert.ok(again.body.latest, "l'analisi salvata resta, non è quella a essere consumata");
 });
 
 test("teardown", async () => {
