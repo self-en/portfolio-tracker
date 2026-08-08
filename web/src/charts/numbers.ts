@@ -49,6 +49,21 @@ export function extent(values: Array<number | null>): { min: number | null; max:
   return { min, max };
 }
 
+// Tick dell'asse y in forma COMPATTA ("1,2 Mln"), per i plot stretti.
+//
+// Su telefono l'asse y scende a 40px: `num(v, 0)` su un valore come 1.234.567
+// misura più del doppio e recharts lo taglia a metà, che è peggio di non
+// mostrarlo. A larghezza piena i tick restano quelli per esteso.
+const COMPACT = new Intl.NumberFormat("it-IT", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+export function compactTick(value: Convertible): string {
+  const n = toNumber(value);
+  return n === null ? "" : COMPACT.format(n);
+}
+
 /** Clamp, per non far uscire un raggio d'angolo dalla sua colonna. */
 export function clamp(value: number, lo: number, hi: number): number {
   return value < lo ? lo : value > hi ? hi : value;

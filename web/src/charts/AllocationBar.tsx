@@ -50,8 +50,13 @@ export default function AllocationBar({
   const barRef = useRef<HTMLDivElement>(null);
   const barWidth = useElementWidth(barRef);
   // L'indice del segmento sotto il puntatore (o col focus), non il segmento: è
-  // ciò che i quattro handler qui sotto confrontano.
+  // ciò che gli handler qui sotto confrontano.
   const [hover, setHover] = useState<number | null>(null);
+  // E l'indice del segmento aperto con un TOCCO. Due stati e non uno: in un tap
+  // arrivano pointerenter, focus, click e pointerleave dentro lo stesso gesto,
+  // quindi un unico stato si aprirebbe e si richiuderebbe da solo. `pinned`
+  // sopravvive al pointerleave, `hover` no.
+  const [pinned, setPinned] = useState<number | null>(null);
 
   const rows = useMemo(() => {
     const list = (items || []).filter((it) => toNumberOrZero(it.weight) > 0);
@@ -82,7 +87,8 @@ export default function AllocationBar({
     });
   }, [items, barWidth, theme]);
 
-  const hovered = hover === null ? null : rows.find((r) => r.index === hover) ?? null;
+  const shownIndex = pinned ?? hover;
+  const shown = shownIndex === null ? null : rows.find((r) => r.index === shownIndex) ?? null;
 
   const table = (
     <div className="table-wrap">
@@ -100,11 +106,17 @@ export default function AllocationBar({
           </tr>
         </thead>
         <tbody>
+          {/* data-label ripete l'intestazione: sotto i 640px la riga diventa una
+              scheda e senza di esso resterebbe una colonna di numeri anonimi. */}
           {rows.map((r) => (
             <tr key={r.key}>
-              <td>{r.label}</td>
-              <td className="num">{money(r.marketValue, baseCcy)}</td>
-              <td className="num">{pct(r.weightRaw)}</td>
+              <td data-label="Categoria">{r.label}</td>
+              <td className="num" data-label="Valore">
+                {money(r.marketValue, baseCcy)}
+              </td>
+              <td className="num" data-label="Peso">
+                {pct(r.weightRaw)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -146,10 +158,22 @@ export default function AllocationBar({
             style={{ flexGrow: r.weight, flexBasis: 0, background: r.color }}
             // Il tooltip arricchisce, non fa da cancello: lo stesso contenuto
             // compare col focus da tastiera, e i valori sono comunque in tabella.
-            onPointerEnter={() => setHover(r.index)}
+            onPointerEnter={() => {
+              setHover(r.index);
+              // Passando su un ALTRO segmento il tooltip fissato col tocco si
+              // sgancia, altrimenti resterebbe appeso al segmento di prima.
+              setPinned((cur) => (cur === r.index ? cur : null));
+            }}
             onPointerLeave={() => setHover((cur) => (cur === r.index ? null : cur))}
             onFocus={() => setHover(r.index)}
-            onBlur={() => setHover((cur) => (cur === r.index ? null : cur))}
+            onBlur={() => {
+              setHover((cur) => (cur === r.index ? null : cur));
+              setPinned((cur) => (cur === r.index ? null : cur));
+            }}
+            // Un tocco rivela, un secondo nasconde. Le proporzioni non si toccano:
+            // per i segmenti da 3px la via principale restano la legenda e la
+            // vista tabellare, che ci sono sempre.
+            onClick={() => setPinned((cur) => (cur === r.index ? null : r.index))}
             aria-label={`${r.label}: ${money(r.marketValue, baseCcy)}, ${pct(r.weightRaw)}`}
           >
             {r.inline ? (
@@ -164,7 +188,7 @@ export default function AllocationBar({
                 {r.inline}
               </span>
             ) : null}
-            {hovered !== null && hovered.index === r.index ? (
+            {shown !== null && shown.index === r.index ? (
               <span className="pt-allocbar-tip">
                 <ChartTooltip
                   title={r.label}

@@ -294,6 +294,14 @@
   min-height: 34px;
 }
 
+/* La sparkline esce da Sparkline.tsx con width/height in ATTRIBUTI: senza queste
+   due righe non si rimpicciolisce, e su una tessera a piena larghezza di telefono
+   sarebbe l'unica cosa che allarga la pagina. */
+.pt-tile-spark svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .pt-tile--hero {
   grid-row: span 1;
 }
@@ -359,8 +367,12 @@
   cursor: pointer;
 }
 
-.pt-monthchip:hover {
-  background: var(--surface-inset);
+/* Solo dove il puntatore può davvero passare sopra: dopo un tap lo stato :hover
+   resta incollato al chip fino al tocco successivo. */
+@media (hover: hover) {
+  .pt-monthchip:hover {
+    background: var(--surface-inset);
+  }
 }
 
 .pt-monthchip--current {
@@ -384,7 +396,10 @@
 }
 
 .pt-agenda-month {
-  scroll-margin-top: 5rem;
+  /* Quanto è alta la topbar sticky: con 5rem hardcoded il titolo del mese finiva
+     sotto la barra, e ora che la topbar sta su una riga sola il numero giusto è
+     uno solo, dichiarato in styles.css. */
+  scroll-margin-top: var(--topbar-h);
 }
 
 .pt-agenda-monthhead {
@@ -507,7 +522,11 @@
 
 .pt-dialog {
   width: min(30rem, 100%);
+  /* 100vh non tiene conto delle barre dinamiche del browser mobile: il dialogo
+     sarebbe più alto del visibile e il fondo finirebbe sotto la chrome. La riga
+     100vh resta prima come fallback per chi non conosce dvh. */
   max-height: calc(100vh - 2 * var(--gap));
+  max-height: calc(100dvh - 2 * var(--gap));
   overflow-y: auto;
   padding: calc(var(--gap) * 1.25);
   background: var(--surface-raised);
@@ -615,7 +634,7 @@
   margin-left: 0.35rem;
 }
 
-/* ---------- 390px ---------- */
+/* ---------- tablet e telefono ---------- */
 @media (max-width: 900px) {
   .pt-kpi {
     grid-template-columns: 1fr 1fr;
@@ -624,16 +643,12 @@
   .pt-cols {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 640px) {
-  .pt-kpi,
+  /* Questi due reset stavano a 640px, ma è nella fascia tablet che facevano
+     danno: due colonne di prosa italiana per i rendimenti, e cinque colonne per
+     una voce di agenda, in 384px di metà schermo. */
   .pt-returns {
     grid-template-columns: 1fr;
-  }
-
-  .pt-tile-value--hero {
-    font-size: 48px;
   }
 
   .pt-agenda-item {
@@ -664,8 +679,59 @@
     order: 5;
     grid-column: 1 / -1;
   }
+}
+
+@media (max-width: 640px) {
+  .pt-kpi {
+    grid-template-columns: 1fr;
+  }
+
+  /* La cifra eroe scala con la larghezza: a 360px "€ 1.234.567,89" a 48px sfonda
+     la tessera e va a capo IN MEZZO ALLE CIFRE, che è illeggibile. Sopra i 437px
+     di viewport il clamp restituisce comunque i 48px di prima. */
+  .pt-tile-value--hero {
+    font-size: clamp(30px, 11vw, 48px);
+  }
 
   .pt-allocbar {
     height: 52px;
+  }
+
+  /* In modalità schede le righe della vista tabellare sono alte: con le 18rem di
+     max-height si vedrebbe circa un record, in uno scroller dentro lo scroller di
+     pagina. La regola vive qui, dove vive la classe, e non in styles.css: così
+     non dipende dall'ordine in cui i due fogli finiscono nel bundle. */
+  .pt-tableview .table-wrap {
+    max-height: none;
+  }
+
+  /* Il tooltip si allinea alla BARRA, non al segmento: centrato su un segmento da
+     3px con un .pt-tooltip da 11rem sbordava di ~80px dal primo e dall'ultimo,
+     generando scroll orizzontale di pagina. Per farlo, il contenitore di
+     riferimento diventa la barra invece del bottone. */
+  .pt-allocbar {
+    position: relative;
+  }
+
+  .pt-allocbar-seg {
+    position: static;
+  }
+
+  .pt-allocbar-tip {
+    left: 0;
+    right: 0;
+    transform: none;
+  }
+
+  .pt-allocbar-tip .pt-tooltip {
+    min-width: 0;
+  }
+}
+
+/* Il vincolo è il DITO, non la larghezza: così vale anche sui tablet e il desktop
+   resta compatto. */
+@media (pointer: coarse) {
+  .pt-monthchip {
+    min-height: 44px;
   }
 }

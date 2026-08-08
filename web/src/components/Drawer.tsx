@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import useDialogBehavior from "./useDialogBehavior";
 import type { ReactNode } from "react";
 
 interface DrawerProps {
@@ -20,20 +21,11 @@ interface DrawerProps {
 export default function Drawer({ open, title, subtitle, onClose, children, footer }: DrawerProps) {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Esc chiude, e il focus entra nel pannello: senza, la tastiera resterebbe sulla
-  // tabella dietro, con l'utente che digita in un campo che non vede.
-  useEffect(() => {
-    if (!open) return undefined;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      "input:not([readonly]), select, textarea, button"
-    );
-    first?.focus();
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  // Esc chiude, il focus entra nel PANNELLO e la pagina dietro sta ferma. Non più
+  // sul primo campo: su telefono aprirebbe la tastiera coprendo metà del drawer
+  // prima che si legga il titolo. Da tastiera resta corretto — il focus è nel
+  // dialogo e il primo Tab arriva sul primo campo.
+  useDialogBehavior(open, onClose, panelRef);
 
   if (!open) return null;
 
@@ -45,6 +37,8 @@ export default function Drawer({ open, title, subtitle, onClose, children, foote
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        // Senza tabIndex la <section> non è un bersaglio valido per focus().
+        tabIndex={-1}
         ref={panelRef}
       >
         <header className="drawer-header">
