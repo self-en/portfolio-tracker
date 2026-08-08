@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { post } from "../api";
 import { date, money, num, qty } from "../format";
 import { useToast } from "./Toast";
+import useDialogBehavior from "./useDialogBehavior";
 import { ApiError } from "../api";
 import type { FormEvent } from "react";
 import type { CalendarEvent, ConfirmEventResponse, InstrumentRef } from "../types";
@@ -144,7 +145,6 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
   const queryClient = useQueryClient();
   const toast = useToast();
   const cardRef = useRef<HTMLDivElement>(null);
-  const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const suggestedRate = looksGovernment(event?.instrument) ? RATE_GOVT : RATE_OTHER;
 
@@ -158,17 +158,10 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
   // i `details` con l'hint su come procedere.
   const [serverError, setServerError] = useState<ApiError | null>(null);
 
-  useEffect(() => {
-    firstFieldRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  // Il dialogo è montato solo quando è aperto, quindi `open` è sempre true. Il
+  // focus va sulla card e non sul campo data: su telefono il primo campo aprirebbe
+  // il selettore di data sopra il dialogo appena si tocca "Conferma incasso".
+  useDialogBehavior(true, onClose, cardRef);
 
   /** Cambiando aliquota (o lordo) la ritenuta si ricalcola, ma resta editabile. */
   const applyRate = (nextRate: string, nextGross: string | null = gross) => {
@@ -234,6 +227,7 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
         role="dialog"
         aria-modal="true"
         aria-labelledby="pt-confirm-title"
+        tabIndex={-1}
         ref={cardRef}
       >
         <h2 id="pt-confirm-title">{KIND_TITLES[event.kind] || "Conferma l'evento"}</h2>
@@ -285,7 +279,6 @@ export default function ConfirmEventDialog({ event, portfolioId, onClose }: Conf
           <label className="field">
             <span className="field-label">Data del movimento</span>
             <input
-              ref={firstFieldRef}
               className="input"
               type="date"
               value={tradeDate}

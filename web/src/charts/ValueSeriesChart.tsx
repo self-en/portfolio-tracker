@@ -1,11 +1,12 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, useRef } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { date as fmtDate, money, monthLabel, num } from "../format";
 import ChartFrame from "./ChartFrame";
 import ChartTooltip, { pointOf } from "./ChartTooltip";
 import useChartTheme from "./useChartTheme";
+import useElementWidth from "./useElementWidth";
 import { AREA_FILL_OPACITY } from "./contrast";
-import { toNumber } from "./numbers";
+import { compactTick, toNumber } from "./numbers";
 import type { TooltipRenderProps, TooltipRow } from "./ChartTooltip";
 import type { LegendItems } from "./ChartLegend";
 import type { SeriesPoint, ValueSeriesResponse } from "../types";
@@ -85,6 +86,15 @@ export default function ValueSeriesChart({ points, meta, refetching = false }: V
   const theme = useChartTheme();
   const gradientId = `${safe(useId())}-value-fill`;
 
+  // La larghezza REALE del plot, non un media query listener: useElementWidth la
+  // osserva già con un ResizeObserver, e ciò che conta qui è quanto spazio ha il
+  // disegno (un grafico dentro un drawer è stretto anche su schermo largo).
+  // Con w === 0, primo render prima della misura, si usano i valori desktop: così
+  // non c'è un salto di layout all'apertura.
+  const plotRef = useRef<HTMLDivElement>(null);
+  const plotWidth = useElementWidth(plotRef);
+  const narrow = plotWidth > 0 && plotWidth < 480;
+
   const seriesColor = theme.series(0);
   const baseCcy = meta?.baseCcy || "EUR";
   const granularity = meta?.granularity || "day";
@@ -150,12 +160,18 @@ export default function ValueSeriesChart({ points, meta, refetching = false }: V
           </tr>
         </thead>
         <tbody>
+          {/* data-label ripete l'intestazione: sotto i 640px la riga diventa una
+              scheda e senza di esso resterebbe una colonna di numeri anonimi. */}
           {data.map((p) => (
             <tr key={p.date}>
-              <td>{fmtDate(p.date)}</td>
-              <td className="num">{money(p.raw.value, baseCcy)}</td>
-              <td className="num">{money(p.raw.netInvested, baseCcy)}</td>
-              <td>{p.partial ? "incompleti" : "completi"}</td>
+              <td data-label="Data">{fmtDate(p.date)}</td>
+              <td className="num" data-label="Valore">
+                {money(p.raw.value, baseCcy)}
+              </td>
+              <td className="num" data-label="Investito netto">
+                {money(p.raw.netInvested, baseCcy)}
+              </td>
+              <td data-label="Dati">{p.partial ? "incompleti" : "completi"}</td>
             </tr>
           ))}
         </tbody>
@@ -183,106 +199,114 @@ export default function ValueSeriesChart({ points, meta, refetching = false }: V
       }
       table={table}
     >
-      <ResponsiveContainer width="100%" height={300}>
-        <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={seriesColor} stopOpacity={AREA_FILL_OPACITY} />
-              <stop offset="100%" stopColor={seriesColor} stopOpacity={0.01} />
-            </linearGradient>
-          </defs>
+      <div ref={plotRef}>
+        {/* 210px invece di 300: su un telefono in verticale un grafico da 300px si
+            prende un terzo dello schermo prima che si veda il resto della pagina. */}
+        <ResponsiveContainer width="100%" height={narrow ? 210 : 300}>
+          <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={seriesColor} stopOpacity={AREA_FILL_OPACITY} />
+                <stop offset="100%" stopColor={seriesColor} stopOpacity={0.01} />
+              </linearGradient>
+            </defs>
 
-          {/* Griglia recessiva: hairline solida, un passo dalla superficie. */}
-          <CartesianGrid
-            stroke={theme.grid}
-            strokeWidth={theme.marks.gridWidth}
-            vertical={false}
-          />
-          <XAxis
-            dataKey="date"
-            tickFormatter={formatX}
-            stroke={theme.axis}
-            strokeWidth={theme.marks.gridWidth}
-            tick={{ fill: theme.textMuted, fontSize: 11 }}
-            tickLine={false}
-            minTickGap={44}
-            interval="preserveStartEnd"
-          />
-          {/* UN SOLO asse y, senza identificatore d'asse: non può nascerne un secondo. */}
-          <YAxis
-            domain={[0, "auto"]}
-            tickFormatter={(v) => num(v, 0)}
-            stroke={theme.axis}
-            strokeWidth={theme.marks.gridWidth}
-            tick={{ fill: theme.textMuted, fontSize: 11 }}
-            tickLine={false}
-            width={58}
-          />
-          {/* Crosshair + tooltip: sono il default su linee e aree, non un extra. */}
-          <Tooltip
-            content={tooltip}
-            cursor={{ stroke: theme.axis, strokeWidth: theme.marks.gridWidth }}
-            isAnimationActive={false}
-          />
+            {/* Griglia recessiva: hairline solida, un passo dalla superficie. */}
+            <CartesianGrid
+              stroke={theme.grid}
+              strokeWidth={theme.marks.gridWidth}
+              vertical={false}
+            />
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatX}
+              stroke={theme.axis}
+              strokeWidth={theme.marks.gridWidth}
+              tick={{ fill: theme.textMuted, fontSize: 11 }}
+              tickLine={false}
+              minTickGap={44}
+              interval="preserveStartEnd"
+            />
+            {/* UN SOLO asse y, senza identificatore d'asse: non può nascerne un secondo. */}
+            <YAxis
+              domain={[0, "auto"]}
+              // Su un plot stretto 58px d'asse sono il 18% della larghezza: si
+              // scende a 40, e i tick passano alla forma compatta perché per esteso
+              // non ci starebbero. Il fontSize NON cambia: textWidth.ts misura con
+              // un font fisso, e ridurlo scollerebbe la misura dal disegno.
+              tickFormatter={narrow ? compactTick : (v) => num(v, 0)}
+              stroke={theme.axis}
+              strokeWidth={theme.marks.gridWidth}
+              tick={{ fill: theme.textMuted, fontSize: 11 }}
+              tickLine={false}
+              width={narrow ? 40 : 58}
+            />
+            {/* Crosshair + tooltip: sono il default su linee e aree, non un extra. */}
+            <Tooltip
+              content={tooltip}
+              cursor={{ stroke: theme.axis, strokeWidth: theme.marks.gridWidth }}
+              isAnimationActive={false}
+            />
 
-          {/* Il wash resta CONTINUO anche sui tratti incerti: un buco nel
-              riempimento somiglierebbe a un valore andato a zero. */}
-          <Area
-            dataKey="value"
-            stroke="none"
-            fill={`url(#${gradientId})`}
-            isAnimationActive={false}
-            activeDot={{
-              r: theme.marks.markerMinSize / 2,
-              fill: seriesColor,
-              // Anello di 2px in colore superficie: il marker resta leggibile
-              // dove attraversa la linea.
-              stroke: theme.surface,
-              strokeWidth: 2,
-            }}
-          />
-
-          {/* Stessa serie, due tratti: solido dove il dato è completo,
-              tratteggiato dove non lo è. Nessuna delle due è una serie in più —
-              per questo non compaiono nel conteggio della legenda. */}
-          <Area
-            dataKey="solid"
-            fill="none"
-            stroke={seriesColor}
-            strokeWidth={theme.marks.lineWidth}
-            strokeLinecap={theme.marks.lineCap}
-            strokeLinejoin="round"
-            dot={false}
-            activeDot={false}
-            isAnimationActive={false}
-          />
-          <Area
-            dataKey="dashed"
-            fill="none"
-            stroke={seriesColor}
-            strokeWidth={theme.marks.lineWidth}
-            strokeLinecap={theme.marks.lineCap}
-            strokeDasharray={DASH_PARTIAL}
-            dot={false}
-            activeDot={false}
-            isAnimationActive={false}
-          />
-
-          {hasInvested ? (
+            {/* Il wash resta CONTINUO anche sui tratti incerti: un buco nel
+                riempimento somiglierebbe a un valore andato a zero. */}
             <Area
-              dataKey="netInvested"
+              dataKey="value"
+              stroke="none"
+              fill={`url(#${gradientId})`}
+              isAnimationActive={false}
+              activeDot={{
+                r: theme.marks.markerMinSize / 2,
+                fill: seriesColor,
+                // Anello di 2px in colore superficie: il marker resta leggibile
+                // dove attraversa la linea.
+                stroke: theme.surface,
+                strokeWidth: 2,
+              }}
+            />
+
+            {/* Stessa serie, due tratti: solido dove il dato è completo,
+                tratteggiato dove non lo è. Nessuna delle due è una serie in più —
+                per questo non compaiono nel conteggio della legenda. */}
+            <Area
+              dataKey="solid"
               fill="none"
-              stroke={theme.textMuted}
+              stroke={seriesColor}
               strokeWidth={theme.marks.lineWidth}
               strokeLinecap={theme.marks.lineCap}
-              strokeDasharray={DASH_INVESTED}
+              strokeLinejoin="round"
               dot={false}
               activeDot={false}
               isAnimationActive={false}
             />
-          ) : null}
-        </AreaChart>
-      </ResponsiveContainer>
+            <Area
+              dataKey="dashed"
+              fill="none"
+              stroke={seriesColor}
+              strokeWidth={theme.marks.lineWidth}
+              strokeLinecap={theme.marks.lineCap}
+              strokeDasharray={DASH_PARTIAL}
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />
+
+            {hasInvested ? (
+              <Area
+                dataKey="netInvested"
+                fill="none"
+                stroke={theme.textMuted}
+                strokeWidth={theme.marks.lineWidth}
+                strokeLinecap={theme.marks.lineCap}
+                strokeDasharray={DASH_INVESTED}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+              />
+            ) : null}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </ChartFrame>
   );
 }

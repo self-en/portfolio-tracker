@@ -22,6 +22,46 @@ interface PositionsTableProps {
 // involucro, le plusvalenze da ETF non compensano le minus da redditi diversi e
 // il rateo cedolare è reddito, non capital gain (docs/decisions.md §3).
 
+/** Una colonna: `optional` sparisce sotto i 640px, dove le righe sono schede. */
+interface Col {
+  label: string;
+  className?: string;
+  optional?: boolean;
+}
+
+// Le colonne in un posto solo, come già fa DataTable: l'intestazione e il
+// `data-label` della cella DEVONO essere la stessa stringa, perché sotto i 640px
+// la riga diventa una scheda e l'etichetta di ogni valore è quel data-label. Con
+// le stringhe scritte in due punti la scheda mentirebbe alla prima modifica.
+//
+// Costo medio, Realizzato e Rateo sono `optional`: su telefono sono le tre voci
+// ridondanti (il carico si legge dal latente, il realizzato dal dettaglio
+// strumento), e togliendole la scheda scende da 11 righe a 8. Su desktop restano.
+const COLS: Col[] = [
+  { label: "Strumento" },
+  { label: "Quantità", className: "num" },
+  { label: "Costo medio", className: "num", optional: true },
+  { label: "Prezzo", className: "num" },
+  { label: "Valore", className: "num" },
+  { label: "Peso", className: "num" },
+  { label: "Latente", className: "num" },
+  { label: "Latente %", className: "num" },
+  { label: "Realizzato", className: "num", optional: true },
+  { label: "Redditi netti", className: "num" },
+  { label: "Rateo", className: "num", optional: true },
+];
+
+/** Classe e `data-label` di una cella, presi dalla colonna omonima. */
+function cell(label: string, tone?: string) {
+  const col = COLS.find((c) => c.label === label);
+  return {
+    className:
+      [col?.className, col?.optional ? "cell-optional" : "", tone].filter(Boolean).join(" ") ||
+      undefined,
+    "data-label": label,
+  };
+}
+
 // Come in WarningsBanner: la chiave arriva dal server, quindi un codice non
 // previsto qui degrada nel proprio codice invece di essere un errore di tipo.
 const WARNING_LABELS: Record<string, string> = {
@@ -75,17 +115,18 @@ export default function PositionsTable({ items, baseCcy = "EUR", asOf }: Positio
         </caption>
         <thead>
           <tr>
-            <th scope="col">Strumento</th>
-            <th scope="col" className="num">Quantità</th>
-            <th scope="col" className="num">Costo medio</th>
-            <th scope="col" className="num">Prezzo</th>
-            <th scope="col" className="num">Valore</th>
-            <th scope="col" className="num">Peso</th>
-            <th scope="col" className="num">Latente</th>
-            <th scope="col" className="num">Latente %</th>
-            <th scope="col" className="num">Realizzato</th>
-            <th scope="col" className="num">Redditi netti</th>
-            <th scope="col" className="num">Rateo</th>
+            {COLS.map((c) => (
+              <th
+                key={c.label}
+                scope="col"
+                className={
+                  [c.className, c.optional ? "cell-optional" : ""].filter(Boolean).join(" ") ||
+                  undefined
+                }
+              >
+                {c.label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -93,7 +134,10 @@ export default function PositionsTable({ items, baseCcy = "EUR", asOf }: Positio
             const inst = row.instrument || {};
             return (
               <tr key={inst.id}>
-                <th scope="row" style={{ fontWeight: 500, textAlign: "left" }}>
+                {/* `scope="row"` resta: è la cella che identifica la posizione per
+                    lo screen reader. Lo stile inline diventa una classe, così la
+                    trasformazione in scheda può intervenire sulla cella. */}
+                <th scope="row" className="cell-rowhead" data-label="Strumento">
                   {inst.id ? (
                     <Link to={`/strumenti/${inst.id}`}>{inst.name || inst.ticker || inst.isin}</Link>
                   ) : (
@@ -104,33 +148,33 @@ export default function PositionsTable({ items, baseCcy = "EUR", asOf }: Positio
                     {[inst.ticker, inst.isin, inst.currency].filter(Boolean).join(" · ")}
                   </span>
                 </th>
-                <td className="num">
+                <td {...cell("Quantità")}>
                   <QuantityCell row={row} />
                 </td>
-                <td className="num">{num(row.avgCost, 4)}</td>
-                <td className="num">
+                <td {...cell("Costo medio")}>{num(row.avgCost, 4)}</td>
+                <td {...cell("Prezzo")}>
                   {num(row.price, 4)}
                   <span className="pt-cell-sub">
                     {row.priceDate ? date(row.priceDate) : "nessuna quotazione"}
                   </span>
                   {row.stale ? <StaleBadge stale /> : null}
                 </td>
-                <td className="num">{money(row.marketValueBase, baseCcy)}</td>
-                <td className="num">{pct(row.weight, 1)}</td>
-                <td className={`num ${toneOf(row.unrealizedPnl)}`}>
+                <td {...cell("Valore")}>{money(row.marketValueBase, baseCcy)}</td>
+                <td {...cell("Peso")}>{pct(row.weight, 1)}</td>
+                <td {...cell("Latente", toneOf(row.unrealizedPnl))}>
                   {signedMoney(row.unrealizedPnl, baseCcy)}
                 </td>
-                <td className={`num ${toneOf(row.unrealizedPnlPct)}`}>
+                <td {...cell("Latente %", toneOf(row.unrealizedPnlPct))}>
                   {signedPct(row.unrealizedPnlPct)}
                 </td>
-                <td className={`num ${toneOf(row.realizedPnl)}`}>
+                <td {...cell("Realizzato", toneOf(row.realizedPnl))}>
                   {signedMoney(row.realizedPnl, baseCcy)}
                 </td>
-                <td className="num">
+                <td {...cell("Redditi netti")}>
                   {money(row.incomeNet, baseCcy)}
                   <span className="pt-cell-sub">lordo {money(row.incomeGross, baseCcy)}</span>
                 </td>
-                <td className="num">{money(row.accruedInterest, baseCcy)}</td>
+                <td {...cell("Rateo")}>{money(row.accruedInterest, baseCcy)}</td>
               </tr>
             );
           })}

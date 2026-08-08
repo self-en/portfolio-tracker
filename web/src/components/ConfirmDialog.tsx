@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import Spinner from "./Spinner";
+import useDialogBehavior from "./useDialogBehavior";
 import type { ReactNode } from "react";
 
 interface ConfirmDialogProps {
@@ -36,24 +37,30 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    cancelRef.current?.focus();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onCancel?.();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, busy, onCancel]);
+  // Il focus iniziale resta su ANNULLA (non è un campo, quindi non apre nessuna
+  // tastiera) e Esc non chiude mentre l'operazione è in corso: interromperla a
+  // metà lascerebbe l'utente senza sapere se è andata a buon fine.
+  useDialogBehavior(open, onCancel, panelRef, {
+    closeOnEscape: !busy,
+    initialFocus: cancelRef,
+  });
 
   if (!open) return null;
 
   return (
     <div className="modal-root">
       <div className="drawer-backdrop" aria-hidden="true" />
-      <div className="modal card" role="alertdialog" aria-modal="true" aria-label={title}>
+      <div
+        className="modal card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={panelRef}
+      >
         <h2 className="modal-title">{title}</h2>
         {message ? <p className="modal-message">{message}</p> : null}
         {detail ? <p className="muted small">{detail}</p> : null}

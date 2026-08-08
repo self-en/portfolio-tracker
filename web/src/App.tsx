@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { NavLink, Outlet, createBrowserRouter } from "react-router-dom";
+import { Outlet, createBrowserRouter } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./api";
 import { RequireAuth, useAuth } from "./auth";
 import { RANGES, useApp } from "./AppContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 import EmptyState from "./components/EmptyState";
+import NavMenu, { NavLinks } from "./components/NavMenu";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Movements from "./pages/Movements";
@@ -83,24 +84,25 @@ function Header() {
   return (
     <header className="topbar">
       <div className="topbar-inner">
+        {/* Sotto i 640px la topbar sta su UNA riga: [☰] · portafoglio · periodo.
+            Il panino porta le voci e l'Esci, il marchio si nasconde (ogni
+            schermata ha già il suo h1) e la larghezza che libera è esattamente
+            quella che serve ai due select. */}
+        <NavMenu items={NAV} onLogout={logout} />
         <span className="brand">Portfolio Tracker</span>
         <nav className="nav" aria-label="Navigazione principale">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              // `end` solo sulla root: senza, "/" risulterebbe attivo su ogni rotta.
-              end={item.to === "/"}
-              className={({ isActive }) => (isActive ? "nav-link nav-link--active" : "nav-link")}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          <NavLinks items={NAV} />
         </nav>
         <div className="topbar-tools">
           <PortfolioSelect />
           <RangeSelect />
-          <button type="button" className="btn btn--ghost btn--small" onClick={logout}>
+          {/* Su telefono l'Esci vive nel pannello del menu: qui resterebbe senza
+              spazio, e il cluster dei select sfonderebbe i 360px. */}
+          <button
+            type="button"
+            className="btn btn--ghost btn--small topbar-logout"
+            onClick={logout}
+          >
             Esci
           </button>
         </div>
