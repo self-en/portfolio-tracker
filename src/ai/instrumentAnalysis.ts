@@ -2,31 +2,20 @@
 //
 // Confine: questo modulo riceve un `AnalysisContext` GIÀ ASSEMBLATO e restituisce un
 // risultato validato. Non conosce il database, non conosce fastify, non decide cosa
-// mettere nel contesto — così l'unica cosa che serve per provarlo è un client finto
+// mettere nel contesto — così l'unica cosa che serve per provarlo è un runner finto
 // (`_setClient`), e nessun test spende soldi.
+//
+// Il trasporto (Agent SDK, opzioni, timeout, credenziali) vive tutto in `client.ts`:
+// qui restano il prompt, la lettura del risultato e la validazione.
 import { z } from "zod";
 import config from "../config";
 import logger from "../logger";
-import { AiError, createAiClient } from "./client";
+import { AiError, createAiRunner } from "./client";
 import { ANALYSIS_SCHEMA, CONFIDENCES, SEVERITIES, VALUATIONS, VERDICTS, buildSystemPrompt, buildUserPrompt } from "./prompt";
 import { errMessage } from "../util/err";
+import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AnalysisContext } from "./prompt";
 import type { AnalysisConfidence, AnalysisPayload, AnalysisUsage, AnalysisVerdict } from "../types";
-
-/**
- * `max_tokens` è un tetto su PENSIERO + RISPOSTA, non solo sulla risposta.
- *
- * A sforzo `xhigh` o `max` il thinking adattivo da solo può consumare 16.000 token:
- * la scheda arriverebbe con `stop_reason: "max_tokens"` — cioè un 502 «analisi
- * troncata» DOPO aver pagato, ogni volta. Per quei due livelli il tetto sale a
- * 64.000, che è quanto la guida del modello prescrive.
- *
- * Ed è il motivo per cui la richiesta è in STREAMING: sopra ~16.000 token una
- * richiesta non in streaming rischia il timeout HTTP del SDK, quindi alzare il tetto
- * senza streaming scambierebbe un troncamento con un timeout. `finalMessage()`
- * restituisce il messaggio completo, quindi il resto del codice non cambia.
- */
-const maxTokensFor = (effort: string): number => (effort === "xhigh" || effort === "max" ? 64_000 : 16_000);
 
 /** Lo stesso vincolo dello schema JSON, ricontrollato in casa. */
 const payloadSchema = z.object({
@@ -73,66 +62,62 @@ export interface AnalysisResult {
   durationMs: number;
 }
 
-/** Il testo di tutti i blocchi `text` della risposta, concatenato. */
-function textOf(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((b: any) => b?.type === "text" && typeof b.text === "string")
-    .map((b: any) => b.text)
-    .join("");
+/**
+ * Perché un `result` non riuscito è fallito, in italiano.
+ *
+ * I sottotipi arrivano dall'Agent SDK e sono l'unico segnale strutturato che
+ * abbiamo: tradurli uno per uno evita il "Errore inatteso" che manda a leggere i
+ * log per capire perché un pulsante non ha funzionato.
+ */
+const SUBTYPE_MESSAGE: Record<string, string> = {
+  error_max_turns: "l'analisi si è fermata prima di concludere",
+  error_max_budget_usd: "l'analisi ha superato il budget previsto",
+  error_max_structured_output_retries: "l'analisi non rispetta il formato previsto",
+  error_during_execution: "il servizio di analisi non ha risposto",
+};
+
+/**
+ * Il modello che ha davvero risposto.
+ *
+ * `modelUsage` è indicizzato per modello: con un fallback attivo chi risponde può
+ * non essere chi è stato chiesto, e si prende quello che ha prodotto più token in
+ * uscita — cioè quello che ha scritto la scheda.
+ */
+function servedBy(result: SDKResultMessage): string | null {
+  const entries = Object.entries(result.modelUsage ?? {});
+  if (entries.length === 0) return null;
+  return entries.sort((a, b) => (b[1]?.outputTokens ?? 0) - (a[1]?.outputTokens ?? 0))[0][0];
 }
 
 /**
  * Analizza uno strumento.
  *
- * Perché l'endpoint BETA e non `client.messages.create`: serve il parametro
- * `fallbacks`. I classificatori di sicurezza possono declinare una richiesta
- * (`stop_reason: "refusal"` con HTTP 200, non un errore), e su un'analisi
- * finanziaria capita per falso positivo. Con `fallbacks: "default"` la richiesta
- * viene rieseguita lato server sul modello di ripiego consigliato, così un falso
- * positivo non diventa un pulsante che non funziona.
+ * L'output strutturato arriva in `structured_output`; `result` (il testo) è il
+ * ripiego per quando l'SDK non lo popola. Si prova prima il campo tipizzato perché
+ * è già un oggetto: passare dal testo significherebbe riparsare ciò che l'SDK ha
+ * appena validato.
  */
 async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResult> {
-  const client = createAiClient();
+  const run = createAiRunner();
   const model = config.ai.model;
   const effort = config.ai.effort;
   const startedAt = Date.now();
 
-  const maxTokens = maxTokensFor(effort);
-  let response: any;
+  let result: SDKResultMessage;
   try {
-    const stream = client.beta.messages.stream({
-      model,
-      max_tokens: maxTokens,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      // Thinking adattivo DICHIARATO invece che lasciato al default: sul modello
-      // predefinito è già attivo, ma su un modello impostato da configurazione
-      // ometterlo significherebbe analizzare un bilancio senza ragionare.
-      thinking: { type: "adaptive" },
-      output_config: {
-        effort: effort as "low" | "medium" | "high" | "xhigh" | "max",
-        // Output strutturato: la scheda arriva già nella forma che il database e la
-        // pagina si aspettano, senza estrarre campi da un testo libero.
-        format: { type: "json_schema", schema: ANALYSIS_SCHEMA as unknown as Record<string, unknown> },
-      },
-      system: [
-        {
-          type: "text",
-          text: buildSystemPrompt(context.instrument.assetClass),
-          // Il prefisso è identico per tutti gli strumenti della stessa classe:
-          // dalla seconda analisi in poi si paga a tariffa di lettura.
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: buildUserPrompt(context) }],
+    result = await run({
+      system: buildSystemPrompt(context.instrument.assetClass),
+      prompt: buildUserPrompt(context),
+      schema: ANALYSIS_SCHEMA as unknown as Record<string, unknown>,
     });
-    // Non si consumano gli eventi uno per uno: l'analisi non è mostrata mentre
-    // arriva, lo streaming serve solo a non incappare nel timeout HTTP.
-    response = await stream.finalMessage();
   } catch (e) {
-    // Un 429 o un 5xx del provider non è un errore interno nostro: è un upstream
-    // che non risponde, e la UI deve poter dire "riprova tra poco".
+    // Un AiError arriva già con il suo codice e un messaggio che spiega (timeout,
+    // nessun risultato): riavvolgerlo qui lo sostituirebbe con un generico "non ha
+    // risposto", cioè butterebbe via l'unica cosa utile.
+    if (e instanceof AiError || (e as { name?: string })?.name === "AiError") throw e;
+
+    // Un 429 o un 5xx a monte non è un errore interno nostro: è un upstream che non
+    // risponde, e la UI deve poter dire "riprova tra poco".
     const status = (e as { status?: number })?.status;
     logger.error(
       { model, status, err: errMessage(e).slice(0, 300) },
@@ -140,11 +125,11 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
     );
     throw new AiError("upstream_error", "il servizio di analisi non ha risposto", {
       status: status ?? null,
-      // Il messaggio dell'upstream viaggia SOLO per i 4xx, dove la causa è la nostra
+      // Il messaggio a monte viaggia SOLO per i 4xx, dove la causa è la nostra
       // richiesta (un parametro non accettato, un modello inesistente): è
       // esattamente ciò che serve vedere in pagina invece di andare a cercare nei
       // log. Sui 5xx non aggiunge nulla e sarebbe rumore. Nessun 4xx dell'API
-      // rimanda indietro la chiave: gli errori di autenticazione parlano di
+      // rimanda indietro la credenziale: gli errori di autenticazione parlano di
       // credenziali non valide, non le citano.
       upstream:
         status !== undefined && status >= 400 && status < 500
@@ -156,30 +141,54 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
 
   const durationMs = Date.now() - startedAt;
 
-  // `refusal` arriva con HTTP 200 e `content` vuoto o parziale: leggere
-  // `content[0]` senza controllare `stop_reason` qui produrrebbe un crash oscuro.
-  if (response?.stop_reason === "refusal") {
-    logger.warn(
-      { model, category: response?.stop_details?.category ?? null },
-      "[ai] analisi rifiutata dai classificatori"
-    );
+  // `refusal` non è un errore di trasporto: arriva con un risultato regolare e
+  // `structured_output` vuoto. Leggerlo senza controllare `stop_reason` qui
+  // produrrebbe un crash oscuro a valle.
+  if (result.stop_reason === "refusal") {
+    logger.warn({ model, subtype: result.subtype }, "[ai] analisi rifiutata dai classificatori");
     throw new AiError("upstream_error", "il modello ha rifiutato di completare l'analisi", {
-      category: response?.stop_details?.category ?? null,
+      stopReason: result.stop_reason,
     });
   }
-  if (response?.stop_reason === "max_tokens") {
+  if (result.stop_reason === "max_tokens") {
     throw new AiError("upstream_error", "analisi troncata: risposta più lunga del limite", {
-      maxTokens,
+      numTurns: result.num_turns,
     });
   }
 
-  const raw = textOf(response?.content);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    logger.error({ model, sample: raw.slice(0, 200) }, "[ai] risposta non è JSON valido");
-    throw new AiError("upstream_error", "l'analisi è tornata in un formato non leggibile");
+  if (result.subtype !== "success" || result.is_error) {
+    const status = result.subtype === "success" ? (result.api_error_status ?? null) : null;
+    const errors = result.subtype === "success" ? [] : result.errors;
+    logger.error(
+      { model, subtype: result.subtype, status, errors: errors.slice(0, 3) },
+      "[ai] analisi non completata dall'agente"
+    );
+    throw new AiError(
+      "upstream_error",
+      SUBTYPE_MESSAGE[result.subtype] ?? "il servizio di analisi non ha risposto",
+      {
+        status,
+        subtype: result.subtype,
+        upstream: errors.length ? errors.join("; ").slice(0, 300) : undefined,
+        hint:
+          status === 429
+            ? "limite di richieste raggiunto: riprova tra qualche minuto"
+            : undefined,
+      }
+    );
+  }
+
+  let parsed: unknown = result.structured_output;
+  if (parsed === undefined || parsed === null) {
+    try {
+      parsed = JSON.parse(result.result);
+    } catch {
+      logger.error(
+        { model, sample: String(result.result).slice(0, 200) },
+        "[ai] risposta non è JSON valido"
+      );
+      throw new AiError("upstream_error", "l'analisi è tornata in un formato non leggibile");
+    }
   }
 
   // Doppia guardia sull'output: lo schema lo impone al modello, zod lo verifica
@@ -196,11 +205,11 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
   }
 
   const usage: AnalysisUsage = {
-    inputTokens: Number(response?.usage?.input_tokens) || null,
-    outputTokens: Number(response?.usage?.output_tokens) || null,
+    inputTokens: Number(result.usage?.input_tokens) || null,
+    outputTokens: Number(result.usage?.output_tokens) || null,
     // Con un fallback attivo il modello che risponde può non essere quello chiesto:
     // conservarlo è l'unico modo di sapere, tra un mese, chi ha scritto la scheda.
-    servedBy: response?.model ?? null,
+    servedBy: servedBy(result),
   };
 
   logger.info(
@@ -211,9 +220,11 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
       effort,
       verdict: decision.data.verdict,
       durationMs,
+      numTurns: result.num_turns,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      cacheRead: response?.usage?.cache_read_input_tokens ?? null,
+      cacheRead: result.usage?.cache_read_input_tokens ?? null,
+      costUsd: result.total_cost_usd ?? null,
     },
     "[ai] analisi completata"
   );
@@ -230,4 +241,4 @@ async function analyzeInstrument(context: AnalysisContext): Promise<AnalysisResu
   };
 }
 
-export { analyzeInstrument, maxTokensFor, payloadSchema, decisionSchema };
+export { analyzeInstrument, payloadSchema, decisionSchema, servedBy as _servedBy };

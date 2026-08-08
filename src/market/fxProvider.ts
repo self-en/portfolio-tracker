@@ -121,7 +121,21 @@ function normalizeEcb(body: any, quote: string): FxRecord[] {
   return out;
 }
 
+/** Provider vuoto: nessuna chiamata di rete. Simmetrico a `createManualProvider` in provider.ts. */
+function createManualFxProvider(): FxProvider {
+  return {
+    name: "manual",
+    async getRates() {
+      return { records: [], source: "none" };
+    },
+    async getLatest() {
+      return { records: [], source: "none" };
+    },
+  };
+}
+
 function createFxProvider(cfg: typeof config = config): FxProvider {
+  if ((cfg.market?.provider || "yahoo").toLowerCase() === "manual") return createManualFxProvider();
   const baseUrl = cfg.market?.fxUrl || "https://api.frankfurter.dev/v2/rates";
 
   return {

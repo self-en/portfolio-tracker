@@ -563,6 +563,22 @@ test("normalizeFundamentals non lancia su un payload vuoto o assurdo", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Provider manuale (nessuna chiamata di rete)
+// ---------------------------------------------------------------------------
+
+test("createFxProvider è manuale quando MARKET_PROVIDER=manual: nessuna chiamata di rete", async () => {
+  // env.ts forza MARKET_PROVIDER=manual per tutti i test — qui si verifica che
+  // fxProvider lo rispetti come già fa provider.ts, altrimenti un backfill
+  // asincrono (enqueueBackfill su uno strumento non-EUR) chiama Frankfurter/BCE
+  // per davvero e scrive tassi reali nel DB mentre un altro test sta asserendo:
+  // è la race che ha già rotto la CI una volta (v. commento in helpers/env.ts).
+  const provider = fx.createFxProvider();
+  assert.equal(provider.name, "manual");
+  assert.deepEqual(await provider.getRates(["USD"]), { records: [], source: "none" });
+  assert.deepEqual(await provider.getLatest(["USD"]), { records: [], source: "none" });
+});
+
+// ---------------------------------------------------------------------------
 // Confine architetturale
 // ---------------------------------------------------------------------------
 
